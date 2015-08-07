@@ -1,0 +1,4 @@
+* Useful Web Pages
+- [[https://gcc.gnu.org/onlinedocs/gcc/Preprocessor-Options.html][GCC Preprocessor Options]]
+- [[https://gcc.gnu.org/onlinedocs/cpp/Invocation.html][GCC Preprocessor Invocation]]
+- [[https://en.wikipedia.org/wiki/C_preprocessor][C Preprocessor Wikipedia]]

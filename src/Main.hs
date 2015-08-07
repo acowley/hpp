@@ -1,156 +1,143 @@
-import Control.Arrow (first, second)
-import Data.Char (isSpace)
-import Data.List
-import Data.Function (on)
+{-# LANGUAGE LambdaCase #-}
+import Control.Monad (join, unless)
+import Hpp
+import Hpp.Config
+import Hpp.Env (Env, deleteKey)
+import Hpp.Tokens
+import Hpp.Types (Error(..))
+import System.Directory (doesFileExist, setCurrentDirectory)
 import System.Environment
+import System.FilePath (splitFileName)
 
-data Config = Config { fileName :: FilePath
-                     , includePaths :: FilePath }
+usage :: IO ()
+usage = mapM_ putStrLn
+  [ "Usage: hpp [options] inputFile [outputFile]"
+  , ""
+  , "Options:"
+  , "-D name"
+  , "  Define name as an object macro defined as 1."
+  , "-D name=definition"
+  , "  Define name as an object macro defined as definition."
+  , "-U name"
+  , "  Remove any previous definition of name."
+  , "-I dir"
+  , "  Add directory dir to the search path for includes."
+  , "-o file"
+  , "  Write output to file."
+  , "-include file"
+  , "  Acts as if #include \"file\" were the first line "
+  , "  in the primary source file. -include options are "
+  , "  processed after -D and -U options."
+  , "-imacros file"
+  , "  Like -include, except that output is discarded. Only"
+  , "  macro definitions are kept."
+  , "-c-compat"
+  , "  C98 compatibility. Implies: -fline-splice -ferase-comments"
+  , "  -fapplication-splice -D __STDC__ "
+  , "  -D __STDC_VERSION__=199409L -D _POSIX_C_SOURCE=200112L"
+  , "-fline-splice"
+  , "  Enable continued line splicing."
+  , "-ferase-comments"
+  , "  Remove all C-style comments before processing."
+  , "-fapplication-splice"
+  , "  Support multi-line function applications." ]
 
--- | The first component of each pair represents the end of a known
--- trigraph sequence (each trigraph begins with two consecutive
--- question marks (@"??"@). The second component is the
--- single-character equivalent that we substitute in for the trigraph.
-trigraphs :: [(Char, Char)]
-trigraphs = [ ('=', '#')
-            , ('/', '\\')
-            , ('\'', '^')
-            , ('(', '[')
-            , (')', ']')
-            , ('!', '|')
-            , ('<', '{')
-            , ('>', '}')
-            , ('-', '~') ]
+breakEqs :: String -> [String]
+breakEqs = aux . break (== '=')
+  where aux (h,[]) = [h]
+        aux (h,'=':t) = [h,"=",t]
+        aux _ = error "breakEqs broke"
 
-trigraphReplacement :: String -> String
-trigraphReplacement = go 0
-  where go :: Int -> String -> String
-        go _ [] = []
-        go 2 ('?':xs) = '?' : go 2 xs
-        go 2 (x:xs) = case lookup x trigraphs of
-                        Just x' -> x' : go 0 xs
-                        Nothing -> "??" ++ x : go 0 xs
-        go i ('?':xs) = go (i+1) xs
+-- | If no space is included between a switch and its argument, break
+-- it into two tokens to simplify parsing.
+splitSwitches :: String -> [String]
+splitSwitches ('-':'I':t@(_:_)) = ["-I",t]
+splitSwitches ('-':'D':t@(_:_)) = ["-D",t]
+splitSwitches ('-':'U':t@(_:_)) = ["-U",t]
+splitSwitches ('-':'o':t@(_:_)) = ["-o",t]
+splitSwitches x = [x]
 
-lineSplicing :: String -> String
-lineSplicing = unlines . go . lines
-  where go :: [String] -> [String]
-        go [] = []
-        go [x] = [x]
-        go (x:t@(y:xs))
-          | last x == '\\' = go ((x++y) : xs)
-          | otherwise = x : go t
-
-data Macro = Object String
-           | Function ([String] -> String)
-
-nextTok :: String -> (String, String)
-nextTok = break (\c -> isSpace c || c == '(' || c == ')') . dropWhile isSpace
-
-deleteKey :: Eq a => a -> [(a,b)] -> [(a,b)]
-deleteKey k = go
-  where go [] = []
-        go (h@(x,_) : xs) = if x == k then xs else h : go xs
-
-directive :: Config -> Int -> String
-          -> Maybe ((Int -> [(String,Macro)] -> [String] -> r)
-                     -> [(String,Macro)] -> [String] -> r)
-directive cfg i ln =
-  case cmd of
-    "define" -> case rst of
-                  ('(':rst') -> let f = _
-                                in Just $ \k ->
-                                   k i'  . ((name, Function f):)
-                  _ -> Just $ \k ->
-                       k i' . ((name, Object (dropWhile isSpace rst)):)
-    "undef" -> Just $ \k -> \ms -> 
-               k i' (deleteKey name ms)
-
-    -- We need to drop the branch not taken, and insert a #line
-    -- command to fixup line counting.
-    "ifdef" -> Just $ \k -> \ms lns ->
-               if name `elem` map fst ms
-                 then _
-                 else _
-    "ifndef" -> _
-    "if" -> _
-    "elif" -> _
-    "line" -> _
-  where (cmd,cmdArg) = nextTok ln
-        (name,rst) = nextTok cmdArg
-        i' = i + 1
-
-data Error = UnterminatedBranch
-           | BadMacroFunction
-           | BadIfPredicate
-           | BadLineArgument
-
-getCmd :: String -> Maybe (String,String)
-getCmd ln = case dropWhile isSpace ln of
-              ('#':rst) -> Just (nextTok rst)
-              _ -> Nothing
-
-takeBranch :: [String] -> Either Error ([String], [String])
-takeBranch = _
-
-dropAllBranches :: [String] -> Either Error (Int, [String])
-dropAllBranches = fmap aux . dropBranch
-  where aux (n,[]) = _
-        aux (n, ln:lns) = case getCmd ln of
-                           Just ("endif",_) -> Right (n+1,lns)
-                           _ -> fmap (first ((n+1)+)) $ dropAllBranches lns
-
--- | Skip to the end of a conditional branch, returning how many lines
--- we've skipped, and the remaining input.
-dropBranch :: [String] -> Either Error (Int, [String])
-dropBranch = go 0
-  where go _ [] = Left UnterminatedBranch
-        go n (l:ls) = case getCmd l of
-                        Just (cmd,_) ->
-                          if cmd `elem` ["else","elif","endif"]
-                            then Right (n, l:ls)
-                            else go (n+1) ls
-                        Nothing -> go (n+1) ls
-
--- Do we really want to do this? A main purpose is removing C
--- comments, which we perhaps don't care about when dealing with
--- Haskell code.
-tokenization = id
-
-macroExpansion :: Config -> [(String, Macro)] -> String
-               -> ([(String,Macro)], String)
-macroExpansion cfg macros = second unlines . go 1 macros . lines
-  where go :: Int -> [(String, Macro)] -> [String]
-           -> ([(String, Macro)], [String])
-        go lineNum ms [] = (ms, [])
-        go lineNum ms (x:xs) =
-          case dropWhile isSpace x of
-            [] -> second (x :) $ go (lineNum + 1) ms xs
-            ('#':cmd) ->
-              case takeWhile (not . isSpace) cmd of
-                "ifdef" -> let tok = dropWhile isSpace $ drop 5 cmd
-                           in if tok `elem` map fst ms
-                              then _
-                              else _
-                "ifndef" -> let tok = dropWhile isSpace $ drop 6 cmd
-                            in if tok `elem` map fst ms
-                               then _
-                               else _
-                "if" -> _
-                "line" -> _
-                "include" -> _
-                "undef" -> let tok = dropWhile isSpace $ drop 5 cmd
-                               ms' = deleteBy ((==) `on` fst)
-                                              (tok, Object "")
-                                              ms
-                           in go (lineNum+1) ms' xs
-                "define" -> _
-            _ -> second (expandLine x :) $ go (lineNum+1) ms xs
-          where expandLine [] = []
-                expandLine l = _
-
-runCPP :: Config -> String -> String
-runCPP _ = id
+-- FIXME: Defining function macros probably doesn't work here.
+parseArgs :: ConfigF Maybe -> [String]
+          -> IO (Either Error (Env, [String], Config, Maybe FilePath))
+parseArgs cfg0 = go [] id cfg0 Nothing . concatMap breakEqs
+  where go env acc cfg out [] =
+          case realizeConfig cfg of
+            Just cfg' -> return (Right (env, acc [], cfg', out))
+            Nothing -> return (Left NoInputFile)
+        go env acc cfg out ("-D":name:"=":body:rst) =
+          case parseDefinition (Important name : Other " " : tokenize body) of
+            Nothing -> return . Left $ BadMacroDefinition 0
+            Just def -> go (def:env) acc cfg out rst
+        go env acc cfg out ("-D":name:rst) =
+          case parseDefinition ([Important name, Other " ", Important "1"]) of
+            Nothing -> return . Left $ BadMacroDefinition 0
+            Just def -> go (def:env) acc cfg out rst
+        go env acc cfg out ("-U":name:rst) =
+          go (deleteKey name env) acc cfg out rst
+        go env acc cfg out ("-I":dir:rst) =
+          let cfg' = cfg { includePathsF = fmap (++[dir]) (includePathsF cfg) }
+          in go env acc cfg' out rst
+        go env acc cfg out ("-include":file:rst) =
+          let ln = "include \"" ++ file ++ "\""
+          in go env (acc . (ln:)) cfg out rst
+        go env acc cfg out ("-c-compat":rst) =
+          let cfg' = cfg { spliceLongLinesF = Just True
+                         , eraseCCommentsF = Just True
+                         , spliceApplicationsF = Just True }
+              defs = concatMap ("-D":)
+                       [ ["__STDC__"]
+                         -- __STDC_VERSION__ is only defined in C94 and later
+                       , ["__STDC_VERSION__","=","199409L"]
+                       , ["_POSIX_C_SOURCE","=","200112L"] ]
+          in go env acc cfg' out (defs ++ rst)
+        go env acc cfg out ("-fline-splice":rst) =
+          go env acc (cfg { spliceLongLinesF = Just True }) out rst
+        go env acc cfg out ("-ferase-comments":rst) =
+          go env acc (cfg { eraseCCommentsF = Just True }) out rst
+        go env acc cfg out ("-fapplication-splice":rst) =
+          go env acc (cfg { spliceApplicationsF = Just True }) out rst
+        go env acc cfg _ ("-o":file:rst) =
+          go env acc cfg (Just file) rst
+        go env acc cfg Nothing (file:rst) =
+          case curFileNameF cfg of
+            Nothing -> go env acc (cfg { curFileNameF = Just file }) Nothing rst
+            Just _ -> go env acc cfg (Just file) rst
+        go _ _ _ (Just _) _ =
+          return . Left $ BadCommandLine "Multiple output files given"
 
 main :: IO ()
-main = return ()
+main = do getArgs >>= \case
+            [] -> usage
+            args -> do cfgNow <- defaultConfigFNow
+                       let args' = concatMap splitSwitches args
+                       (env,lns,cfg,outPath) <- fmap (either (error . show) id)
+                                                     (parseArgs cfgNow args')
+                       exists <- doesFileExist (curFileName cfg)
+                       unless exists . error $
+                         "Couldn't open input file: "++curFileName cfg
+                       let (dir,fileName) = splitFileName $ curFileName cfg
+                       setCurrentDirectory dir
+                       let cfg' = cfg { curFileNameF = pure fileName }
+                       join . runErrHppIO cfg' $
+                         do src <- liftHpp . hppReadFile 0
+                                   $ '"' : curFileName cfg ++ "\""
+                            
+                            (_,r) <- preprocess env (unlines lns ++ src)
+                            case outPath of
+                              Nothing -> return (putStrLn r)
+                              Just f -> return (writeFile f r)
+
+
+{-
+
+For testing against C:
+
+hpp -I/usr/local/include -I/usr/include -fline-splice -ferase-comments -fapplication-splice -D __x86_64__ -D __GNUC__ -D _POSIX_C_SOURCE n_1.c
+
+For the mcpp validation suite
+
+../tool/cpp_test HPP "../../dist/build/hpp/hpp -I/usr/local/include -I/usr/include -fline-splice -ferase-comments -fapplication-splice -D __x86_64__ -D __GNUC__=4 -D __STDC__ -D __STDC_VERSION__=199409L -D _POSIX_C_SOURCE -D __DARWIN_ONLY_UNIX_CONFORMANCE %s.c | gcc -o %s -x c -" "rm %s" < n_i_.lst 
+
+
+-}

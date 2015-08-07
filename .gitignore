@@ -1,0 +1,8 @@
+/dist
+/shell.nix
+/default.nix
+/cabal.sandbox.config
+/buildplan
+/.cabal-sandbox
+/.cabal
+/docsets
