@@ -5,7 +5,7 @@ import Hpp.Config
 import Hpp.Env (Env, deleteKey)
 import Hpp.Tokens
 import Hpp.Types (Error(..))
-import System.Directory (doesFileExist, setCurrentDirectory)
+import System.Directory (doesFileExist)
 import System.Environment
 import System.FilePath (splitFileName)
 
@@ -31,15 +31,15 @@ usage = mapM_ putStrLn
   , "-imacros file"
   , "  Like -include, except that output is discarded. Only"
   , "  macro definitions are kept."
-  , "-c-compat"
-  , "  C98 compatibility. Implies: -fline-splice -ferase-comments"
-  , "  -fapplication-splice -D __STDC__ "
+  , "--cpp"
+  , "  C98 compatibility. Implies: --fline-splice --ferase-comments"
+  , "  --fapplication-splice -D __STDC__ "
   , "  -D __STDC_VERSION__=199409L -D _POSIX_C_SOURCE=200112L"
-  , "-fline-splice"
+  , "--fline-splice"
   , "  Enable continued line splicing."
-  , "-ferase-comments"
+  , "--ferase-comments"
   , "  Remove all C-style comments before processing."
-  , "-fapplication-splice"
+  , "--fapplication-splice"
   , "  Support multi-line function applications." ]
 
 breakEqs :: String -> [String]
@@ -79,9 +79,9 @@ parseArgs cfg0 = go [] id cfg0 Nothing . concatMap breakEqs
           let cfg' = cfg { includePathsF = fmap (++[dir]) (includePathsF cfg) }
           in go env acc cfg' out rst
         go env acc cfg out ("-include":file:rst) =
-          let ln = "include \"" ++ file ++ "\""
+          let ln = "#include \"" ++ file ++ "\""
           in go env (acc . (ln:)) cfg out rst
-        go env acc cfg out ("-c-compat":rst) =
+        go env acc cfg out ("--cpp":rst) =
           let cfg' = cfg { spliceLongLinesF = Just True
                          , eraseCCommentsF = Just True
                          , spliceApplicationsF = Just True }
@@ -91,11 +91,11 @@ parseArgs cfg0 = go [] id cfg0 Nothing . concatMap breakEqs
                        , ["__STDC_VERSION__","=","199409L"]
                        , ["_POSIX_C_SOURCE","=","200112L"] ]
           in go env acc cfg' out (defs ++ rst)
-        go env acc cfg out ("-fline-splice":rst) =
+        go env acc cfg out ("--fline-splice":rst) =
           go env acc (cfg { spliceLongLinesF = Just True }) out rst
-        go env acc cfg out ("-ferase-comments":rst) =
+        go env acc cfg out ("--ferase-comments":rst) =
           go env acc (cfg { eraseCCommentsF = Just True }) out rst
-        go env acc cfg out ("-fapplication-splice":rst) =
+        go env acc cfg out ("--fapplication-splice":rst) =
           go env acc (cfg { spliceApplicationsF = Just True }) out rst
         go env acc cfg _ ("-o":file:rst) =
           go env acc cfg (Just file) rst
@@ -118,9 +118,8 @@ main = do getArgs >>= \case
                        exists <- doesFileExist (curFileName cfg)
                        unless exists . error $
                          "Couldn't open input file: "++curFileName cfg
-                       let (dir,fileName) = splitFileName $ curFileName cfg
-                       setCurrentDirectory dir
-                       let cfg' = cfg { curFileNameF = pure fileName }
+                       let (_dir,fileName) = splitFileName $ curFileName cfg
+                           cfg' = cfg { curFileNameF = pure fileName }
                        join . runErrHppIO cfg' $
                          do src <- liftHpp . hppReadFile 0
                                    $ '"' : curFileName cfg ++ "\""

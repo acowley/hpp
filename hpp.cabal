@@ -4,7 +4,7 @@ synopsis:            A Haskell pre-processor
 
 description: @hpp@ is a Haskell pre-processor that is also a
              C89/C90-compatible pre-processor (with the addition of a
-             @-c-compat@ flag). It is packaged as both a library and
+             @--cpp@ flag). It is packaged as both a library and
              an executable.
              
              .
@@ -22,7 +22,7 @@ description: @hpp@ is a Haskell pre-processor that is also a
              like,
              .
              @
-             hpp -DDEBUG -c-compat foo.c
+             hpp -DDEBUG --cpp foo.c
              @
 
 license:             BSD3

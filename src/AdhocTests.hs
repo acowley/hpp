@@ -1,8 +1,12 @@
 module AdhocTests where
 import Data.Char (isSpace)
 import Hpp
-import Hpp.Tokens
 import Hpp.Config
+import Hpp.Env
+import Hpp.Tokens
+import Hpp.Types
+
+
 
 testProg :: Int -> String
 testProg n = "mcpp-2.7.2/test-c/n_" ++ show n++".c"
