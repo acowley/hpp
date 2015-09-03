@@ -182,7 +182,7 @@ functionMacro params body = paste
                       Rescan p : Rescan (Important arg) : go ts
                 go (t@(Important s):p@(Important "##"):ts) =
                   case lookupKey s gamma of
-                    Nothing -> Rescan t : Rescan p : go ts
+                    Nothing -> Rescan t : go (p:ts)
                     Just ((_,arg),_) -> Rescan (Important arg) : go (p:ts)
                 go (t@(Important "##"):ts) = Rescan t : go ts
                 go (t@(Important ('#':s)) : ts) =
