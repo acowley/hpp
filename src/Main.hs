@@ -99,6 +99,8 @@ parseArgs cfg0 = go [] id cfg0 Nothing . concatMap breakEqs
           go env acc (cfg { spliceApplicationsF = Just True }) out rst
         go env acc cfg _ ("-o":file:rst) =
           go env acc cfg (Just file) rst
+        go env acc cfg out ("-x":_lang:rst) =
+          go env acc cfg out rst -- We ignore source language specification
         go env acc cfg Nothing (file:rst) =
           case curFileNameF cfg of
             Nothing -> go env acc (cfg { curFileNameF = Just file }) Nothing rst
