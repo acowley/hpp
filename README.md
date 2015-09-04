@@ -15,3 +15,11 @@ To use as a C preprocessor, an invocation might look like,
 ```
 hpp -DDEBUG --cpp foo.c
 ```
+
+To have GHC use `hpp` as the C pre-processor, add this line to the top
+of a Haskell source file that makes use of the `CPP` `LANGUAGE`
+pragma.
+
+```
+{-# OPTIONS_GHC -cpp -pgmPhpp -optP--cpp #-}
+```
