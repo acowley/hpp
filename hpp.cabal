@@ -45,6 +45,11 @@ category:            Development
 build-type:          Simple
 extra-source-files:  tests/mcpp-validation.sh, CHANGELOG.md
 cabal-version:       >=1.10
+homepage:            https://github.com/acowley/hpp
+source-repository head
+  type:     git
+  location: http://github.com/acowley/hpp.git
+
 
 library
   exposed-modules:     Hpp,
