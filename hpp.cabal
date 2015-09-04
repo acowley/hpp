@@ -32,7 +32,7 @@ maintainer:          acowley@gmail.com
 copyright:           (C) 2015 Anthony Cowley
 category:            Development
 build-type:          Simple
-extra-source-files:  tests/mcpp-validation.sh
+extra-source-files:  tests/mcpp-validation.sh, CHANGELOG.md
 cabal-version:       >=1.10
 
 library
