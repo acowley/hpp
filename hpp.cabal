@@ -53,6 +53,7 @@ source-repository head
 
 library
   exposed-modules:     Hpp,
+                       Hpp.CmdLine,
                        Hpp.Config,
                        Hpp.Env,
                        Hpp.Expansion,
