@@ -87,7 +87,7 @@ spliceApplications = go Nothing
         opEnds = [',','+','-','*','/','(','=','%','&','|','^']
         opStarts = [',','+','-','*','/','(',')','=','%','&','|','^']
         headOp ops xs = case dropWhile isSpace xs of
-                          c:_ -> c `elem` ops
+                          c:s:_ -> isSpace s && c `elem` ops
                           _ -> False
         headIs x xs = case dropWhile isSpace xs of
                         (y:_) -> y == x

@@ -1,5 +1,5 @@
 name:                hpp
-version:             0.1.0.0
+version:             0.2.0.0
 synopsis:            A Haskell pre-processor
 
 description: @hpp@ is a Haskell pre-processor that is also a
