@@ -7,6 +7,7 @@ import Control.Arrow (second)
 import Control.Exception (catch, IOException)
 import Control.Monad ((<=<))
 import Data.Char (isSpace)
+import Data.List (isPrefixOf)
 import Data.Functor.Identity
 import System.Directory (doesFileExist)
 import System.FilePath ((</>))
@@ -523,11 +524,14 @@ preprocess env inp =
   do cfg <- liftHpp $ GetConfig return
      let splicer = if spliceLongLines cfg then lineSplicing else id
          decomment = if eraseCComments cfg then commentRemoval else id
+         unmark = if inhibitLinemarkers cfg
+                  then filter (not . isPrefixOf "#line")
+                  else id
          appSplicer = if runIdentity (spliceApplicationsF cfg)
                         then spliceApplications else id
          go = macroExpansion cfg env
               -- (\lns -> return (env, lns))
-            . appSplicer . splicer . decomment
+            . appSplicer . splicer . unmark . decomment
             . map trigraphReplacement
      fmap (second unlines) . go $ lines inp
 

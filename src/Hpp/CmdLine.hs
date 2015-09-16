@@ -1,4 +1,3 @@
-
 -- | A front-end to run Hpp with textual arguments as from a command
 -- line invocation.
 module Hpp.CmdLine (runWithArgs) where
@@ -50,6 +49,9 @@ parseArgs cfg0 = go [] id cfg0 Nothing . concatMap breakEqs
         go env acc cfg out ("-include":file:rst) =
           let ln = "#include \"" ++ file ++ "\""
           in go env (acc . (ln:)) cfg out rst
+        go env acc cfg out ("-P":rst) =
+          let cfg' = cfg { inhibitLinemarkersF = Just True }
+          in go env acc cfg' out rst
         go env acc cfg out ("--cpp":rst) =
           let cfg' = cfg { spliceLongLinesF = Just True
                          , eraseCCommentsF = Just True
