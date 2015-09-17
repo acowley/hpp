@@ -1,4 +1,15 @@
 * Useful Web Pages
 - [[https://gcc.gnu.org/onlinedocs/gcc/Preprocessor-Options.html][GCC Preprocessor Options]]
 - [[https://gcc.gnu.org/onlinedocs/cpp/Invocation.html][GCC Preprocessor Invocation]]
-- [[https://en.wikipedia.org/wiki/C_preprocessor][C Preprocessor Wikipedia]]
+- [[https://en.wikipedia.org/wiki/C_preprocessor][C Preprocessor
+  Wikipedia]]
+* Reflection Without Remorse
+If we want to do more elaborate streamed parsing, we can consider a
+[[http://okmij.org/ftp/Haskell/zseq.pdf]["Reflection Without Remorse"]] style of a pipes-like streaming
+architecture.
+
+To implement the type-aligned sequence, we can unsafely reuse
+=Data.Sequence=. Here is a related [[https://github.com/atzeus/reflectionwithoutremorse/blob/master/Data/LiftSequence.hs][example]] of doing just that.
+
+Here is a [[https://github.com/ekmett/machines/issues/68][GitHub issue]] sketching how to port the =machines= library to
+a remorseless framework in order to merge the `Plan` and `Machine` types.

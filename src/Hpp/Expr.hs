@@ -1,3 +1,4 @@
+{-# LANGUAGE ConstraintKinds, RankNTypes, ScopedTypeVariables #-}
 -- | An expression language corresponding to the subset of C syntax
 -- that may be used in preprocessor conditional directives. See
 -- <https://gcc.gnu.org/onlinedocs/cpp/If.html>
@@ -9,6 +10,9 @@ import Data.List (foldl')
 import Text.Read (readMaybe)
 import Hpp.Tokens
 import Data.Char (digitToInt, toLower)
+import Data.Proxy (Proxy(..))
+import Data.Bifunctor (bimap)
+import Data.Bits (Bits)
 
 -- * Token Parsing Types
 
@@ -21,10 +25,71 @@ data BinOp = Add | Sub | Mul | Div | Mod
 
 data UnaryOp = Neg | BitNot | Not | Defined deriving (Eq,Ord,Show)
 
-data Lit = LitInt Int | LitStr String | LitChar Char | LitID String
+data Lit = LitInt Int | LitUInt Word | LitStr String | LitChar Char | LitID String
            deriving (Eq,Ord,Show)
 
 data Parsed = PBinOp BinOp | PUnaryOp UnaryOp | PLit Lit deriving (Eq,Ord,Show)
+
+-- * Integers
+
+-- | If one side of an operator is unsigned, the other side is converted
+-- to unsigned.
+newtype CppInt = CppInt { getCppInt :: Either Word Int }
+
+onCommonType :: forall p c. (c Word, c Int)
+             => p c
+             -> (forall a. c a => a -> a -> a)
+             -> CppInt -> CppInt -> CppInt
+onCommonType _ f (CppInt (Right x)) (CppInt (Right y)) = CppInt (Right (f x y))
+onCommonType _ f (CppInt (Left x)) (CppInt (Left y)) = CppInt (Left (f x y))
+onCommonType _ f (CppInt (Right x)) (CppInt (Left y)) =
+  CppInt (Left $ f (fromIntegral x) y)
+onCommonType _ f (CppInt (Left x)) (CppInt (Right y)) =
+  CppInt (Left $ f x (fromIntegral y))
+
+instance Eq CppInt where
+  CppInt (Left x) == CppInt (Right y) = x == fromIntegral y
+  CppInt (Right x) == CppInt (Left y) = fromIntegral x == y
+  CppInt x == CppInt y = x == y
+
+onCommonTypeB :: forall p c. (c Word, c Int)
+              => p c
+              -> (forall a. c a => a -> a -> Bool)
+              -> CppInt -> CppInt -> Bool
+onCommonTypeB _ f (CppInt (Right x)) (CppInt (Right y)) = f x y
+onCommonTypeB _ f (CppInt (Left x)) (CppInt (Left y)) = f x y
+onCommonTypeB _ f (CppInt (Right x)) (CppInt (Left y)) = f (fromIntegral x) y
+onCommonTypeB _ f (CppInt (Left x)) (CppInt (Right y)) = f x (fromIntegral y)
+
+instance Ord CppInt where
+  x < y = onCommonTypeB (Proxy::Proxy Ord) (<) x y
+  x > y = onCommonTypeB (Proxy::Proxy Ord) (>) x y
+  x <= y = onCommonTypeB (Proxy::Proxy Ord) (<=) x y
+  x >= y = onCommonTypeB (Proxy::Proxy Ord) (>=) x y
+  max x y = onCommonType (Proxy::Proxy Ord) max x y
+  min x y = onCommonType (Proxy::Proxy Ord) min x y
+
+instance Num CppInt where
+  x + y = onCommonType (Proxy::Proxy Num) (+) x y
+  x - y = onCommonType (Proxy::Proxy Num) (-) x y
+  x * y = onCommonType (Proxy::Proxy Num) (*) x y
+  negate (CppInt x) = CppInt (Right $ either (negate . fromIntegral) negate x)
+  abs (CppInt x) = CppInt (bimap abs abs x)
+  signum (CppInt x) = CppInt (bimap signum signum x)
+  fromInteger = CppInt . Right . fromInteger
+
+integralCpp :: (forall a. Integral a => a -> a -> a) -> CppInt -> CppInt -> CppInt
+integralCpp = onCommonType (Proxy::Proxy Integral)
+
+bitsCpp :: (forall a. Bits a => a -> a -> a) -> CppInt -> CppInt -> CppInt
+bitsCpp = onCommonType (Proxy::Proxy Bits)
+
+cppShiftL,cppShiftR :: CppInt -> Int -> CppInt
+cppShiftL (CppInt x) s = CppInt $ bimap (`shiftL` s) (`shiftL` s) x
+cppShiftR (CppInt x) s = CppInt $ bimap (`shiftR` s) (`shiftR` s) x
+
+cppComplement :: CppInt -> CppInt
+cppComplement (CppInt x) = CppInt $ bimap complement complement x
 
 -- * Associativity and Precedence
 
@@ -182,20 +247,21 @@ readNarrowChar _ = Nothing
 
 parseLit :: String -> Maybe Lit
 parseLit s = case readLitInt s of
-               Just i -> Just (LitInt i)
+               Just (CppInt i) -> Just (either LitUInt LitInt i)
                Nothing -> case readNarrowChar s <|> readWideChar s  of
                             Just c -> Just (LitChar c)
                             Nothing -> case readMaybe s of
                                          Just str -> Just (LitStr str)
                                          Nothing -> Nothing
 
-digitsFromBase :: Int -> [Int] -> Int
+digitsFromBase :: Word -> [Word] -> Word
 digitsFromBase base = foldl' aux 0
   where aux acc d = base*acc + d
 
-readLitInt' :: String -> Maybe Int
+readLitInt' :: String -> Maybe Word
 readLitInt' ('0':x:hexDigits)
-  | x == 'x' || x == 'X' = fmap (digitsFromBase 16) (mapM hexDigit hexDigits)
+  | x == 'x' || x == 'X' = fmap (digitsFromBase 16)
+                                (mapM (fmap fromIntegral . hexDigit) hexDigits)
   where hexDigit c
           | c >= '0' && c <= '9' = Just $ digitToInt c
           | c >= 'a' && c <= 'f' = Just $ (fromEnum c - fromEnum 'a') + 10
@@ -205,19 +271,20 @@ readLitInt' ('0':x:hexDigits)
 readLitInt' ('0':octalDigits) = fmap (digitsFromBase 8)
                                      (mapM octalDigit octalDigits)
   where octalDigit c
-          | c >= '0' && c < '8' = Just $ digitToInt c
+          | c >= '0' && c < '8' = Just . fromIntegral $ digitToInt c
           | otherwise = Nothing
 readLitInt' s = readMaybe s
 
 -- | Read a literal integer. These may be decimal, octal, or
 -- hexadecimal, and may have a case-insensitive suffix of @u@, @l@, or
 -- @ul@.
-readLitInt :: String -> Maybe Int
+readLitInt :: String -> Maybe CppInt
 readLitInt s = case map toLower . take 2 $ reverse s of
-                 "lu" -> readLitInt' (init (init s))
+                 "lu" -> fmap (CppInt . Left) (readLitInt' (init (init s)))
                  'l':_ -> readLitInt (init s)
-                 'u':_ -> readLitInt (init s)
-                 _ -> readLitInt' s
+                 'u':_ -> fmap (CppInt . Left . asWord) (readLitInt (init s))
+                 _ -> fmap (CppInt . Right . fromIntegral) (readLitInt' s)
+  where asWord = either id fromIntegral . getCppInt
 
 -- * Shunting Yard
 
@@ -307,6 +374,7 @@ parseExpr = lexExpr >=> shuntRPN [] [] >=> rpnToExpr []
 -- C syntax (some parentheses may be added).
 renderExpr :: Expr -> String
 renderExpr (ELit (LitInt e)) = show e
+renderExpr (ELit (LitUInt e)) = show e ++ "U"
 renderExpr (ELit (LitStr e)) = '"':e++"\""
 renderExpr (ELit (LitChar c)) = [c]
 renderExpr (ELit (LitID e)) = e
@@ -316,36 +384,44 @@ renderExpr (EUnaryOp o e1) = renderUnaryOp o ++ renderExpr e1
 
 -- * Evaluation
 
+-- | All 'Expr's can be evaluated to an 'Int'.
+evalExpr :: Expr -> Int
+evalExpr = either fromIntegral id . getCppInt . evalExpr'
+
 -- | @evalExpr isDefined e@ evaluates expression @e@ in an environment
 -- where the existence of macro definitions is captured by the
 -- @isDefined@ predicate. All expressions evaluate to an 'Int'!
-evalExpr :: Expr -> Int
-evalExpr = go
-  where go (ELit (LitInt e)) = e
-        go (ELit (LitStr _)) = 1
-        go (ELit (LitID _)) = 0
-        go (ELit (LitChar c)) = fromEnum c
+evalExpr' :: Expr -> CppInt
+evalExpr' = go
+  where int = CppInt . Right
+        word = CppInt . Left
+        asInt = either fromIntegral id . getCppInt
+        go (ELit (LitInt e)) = int e
+        go (ELit (LitUInt e)) = word e
+        go (ELit (LitStr _)) = int 1
+        go (ELit (LitID _)) = int 0
+        go (ELit (LitChar c)) = int $ fromEnum c
         go (EBinOp Add e2 e3) = go e2 + go e3
         go (EBinOp Sub e2 e3) = go e2 - go e3
         go (EBinOp Mul e2 e3) = go e2 * go e3
-        go (EBinOp Div e2 e3) = go e2 `div` go e3
-        go (EBinOp Mod e2 e3) = go e2 `mod` go e3
-        go (EBinOp BitAnd e2 e3) = go e2 .&. go e3
-        go (EBinOp BitOr e2 e3) = go e2 .|. go e3
-        go (EBinOp BitXor e2 e3) = go e2 `xor` go e3
-        go (EBinOp ShiftL e2 e3) = go e2 `shiftL` go e3
-        go (EBinOp ShiftR e2 e3) = go e2 `shiftR` go e3
-        go (EBinOp LessThan e2 e3) = fromEnum $ go e2 < go e3
-        go (EBinOp GreaterThan e2 e3) = fromEnum $ go e2 > go e3
-        go (EBinOp EqualTo e2 e3) = fromEnum $ go e2 == go e3
-        go (EBinOp NotEqualTo e2 e3) = fromEnum $ go e2 /= go e3
-        go (EBinOp GreaterOrEqualTo e2 e3) = fromEnum $ go e2 >= go e3
-        go (EBinOp LessOrEqualTo e2 e3) = fromEnum $ go e2 <= go e3
-        go (EBinOp And e2 e3) = fromEnum $ go e2 /= 0 && go e3 /= 0
-        go (EBinOp Or e2 e3) = fromEnum $ go e2 /= 0 || go e3 /= 0
-        go (EUnaryOp Neg e2) = -(go e2)
-        go (EUnaryOp BitNot e2) = complement $ go e2
-        go (EUnaryOp Not e2) = fromEnum $ go e2 == 0
+        go (EBinOp Div e2 e3) = integralCpp div (go e2) (go e3)
+        go (EBinOp Mod e2 e3) = integralCpp mod (go e2) (go e3)
+        go (EBinOp BitAnd e2 e3) = bitsCpp (.&.) (go e2) (go e3)
+        go (EBinOp BitOr e2 e3) = bitsCpp (.|.) (go e2) (go e3)
+        go (EBinOp BitXor e2 e3) = bitsCpp xor (go e2) (go e3)
+        go (EBinOp ShiftL e2 e3) = go e2 `cppShiftL` asInt (go e3)
+        go (EBinOp ShiftR e2 e3) = go e2 `cppShiftR` asInt (go e3)
+        go (EBinOp LessThan e2 e3) = int . fromEnum $ go e2 < go e3
+        go (EBinOp GreaterThan e2 e3) = int . fromEnum $ go e2 > go e3
+        go (EBinOp EqualTo e2 e3) = int . fromEnum $ go e2 == go e3
+        go (EBinOp NotEqualTo e2 e3) = int . fromEnum $ go e2 /= go e3
+        go (EBinOp GreaterOrEqualTo e2 e3) = int . fromEnum $ go e2 >= go e3
+        go (EBinOp LessOrEqualTo e2 e3) = int . fromEnum $ go e2 <= go e3
+        go (EBinOp And e2 e3) = int . fromEnum $ go e2 /= 0 && go e3 /= 0
+        go (EBinOp Or e2 e3) = int . fromEnum $ go e2 /= 0 || go e3 /= 0
+        go (EUnaryOp Neg e2) = negate (go e2)
+        go (EUnaryOp BitNot e2) = cppComplement $ go e2
+        go (EUnaryOp Not e2) = int . fromEnum $ go e2 == 0
         go (EUnaryOp Defined e2) =
           case e2 of 
             ELit (LitInt 1) -> 1

@@ -1,6 +1,8 @@
--- | Helpers for working with 'String's
-module Hpp.String where
+{-# LANGUAGE BangPatterns #-}
+-- | HELPERS for working with 'String's
+module Hpp.String (stringify, unquote, trimSpaces, breakOn, cons) where
 import Data.Char (isSpace)
+import Data.List (isPrefixOf)
 
 -- | Stringification puts double quotes around a string and
 -- backslashes before existing double quote characters and backslash
@@ -32,3 +34,20 @@ trimEnd p = go id
         go acc (c:cs)
           | p c = go (acc . (c:)) cs
           | otherwise = acc (c : go id cs)
+
+-- | Similar to the function of the same name in the @text@ package.
+--
+-- @breakOn needle haystack@ finds the first instance of @needle@ in
+-- @haystack@. The first component of the result is the prefix of
+-- @haystack@ before @needle@ is matched. The second is the remainder of
+-- @haystack@, starting with the match.
+breakOn :: String -> String -> (String, String)
+breakOn needle haystack = go 0 haystack
+  where go _ [] = (haystack, [])
+        go !i xs@(_:xs')
+          | needle `isPrefixOf` xs = (take i haystack, xs)
+          | otherwise = go (i+1) xs'
+
+-- | Used to make switching to the @text@ package easier.
+cons :: a -> [a] -> [a]
+cons x xs = x : xs

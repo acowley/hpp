@@ -6,3 +6,13 @@
 /.cabal-sandbox
 /.cabal
 /docsets
+/tests/mcpp-2.7.2.tar.gz
+tests/mcpp-2.7.2
+.cabbages
+/TAGS
+/hpp.aux
+/hpp.hp
+/hpp.prof
+/hpp.pdf
+/bench.prof
+/hpp.ps

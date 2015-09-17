@@ -21,7 +21,6 @@ data ConfigF f = Config { curFileNameF        :: f FilePath
                         , includePathsF       :: f [FilePath]
                         , spliceLongLinesF    :: f Bool
                         , eraseCCommentsF     :: f Bool
-                        , spliceApplicationsF :: f Bool
                         , inhibitLinemarkersF :: f Bool
                         , prepDateF           :: f DateString
                         , prepTimeF           :: f TimeString }
@@ -35,12 +34,11 @@ realizeConfig (Config (Just fileName)
                       (Just paths)
                       (Just spliceLines)
                       (Just comments)
-                      (Just spliceApps)
                       (Just inhibitLines)
                       (Just pdate)
                       (Just ptime)) =
   Just (Config (pure fileName) (pure paths) (pure spliceLines) (pure comments)
-               (pure spliceApps) (pure inhibitLines) (pure pdate) (pure ptime))
+               (pure inhibitLines) (pure pdate) (pure ptime))
 realizeConfig _ = Nothing
 
 -- | Extract the current file name from a configuration.
@@ -74,7 +72,7 @@ prepTime = runIdentity . prepTimeF
 -- | A default configuration with no current file name set.
 defaultConfigF :: ConfigF Maybe
 defaultConfigF = Config Nothing (Just [])
-                        (Just False) (Just False) (Just False) (Just False)
+                        (Just False) (Just False) (Just False)
                         (Just (DateString "??? ?? ????"))
                         (Just (TimeString "??:??:??"))
 

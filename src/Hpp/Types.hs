@@ -1,11 +1,21 @@
-{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE FlexibleInstances, LambdaCase #-}
 -- | The core types involved used by the pre-processor.
 module Hpp.Types where
+import Control.Monad (ap, join)
+import Control.Monad.IO.Class (MonadIO, liftIO)
+import Control.Monad.Trans.Class (MonadTrans, lift)
+import Control.Monad.Trans.Except (ExceptT, throwE)
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+-- import qualified Data.Map as M
 import Hpp.Config
 import Hpp.Tokens
 
 -- | Line numbers are represented as 'Int's
 type LineNum = Int
+
+-- | A macro binding environment.
+type Env = [(String, Macro)]
+-- type Env = M.Map String Macro
 
 -- * Errors
 
@@ -22,66 +32,142 @@ data Error = UnterminatedBranch
            | BadMacroArguments LineNum String
            | NoInputFile
            | BadCommandLine String
+           | RanOutOfInput
              deriving (Eq, Ord, Show)
+
+-- | Hpp can raise various parsing errors.
+class HasError m where
+  throwError :: Error -> m a
+
+instance Monad m => HasError (ExceptT Error m) where
+  throwError = throwE
+
+instance (Monad m, HasHppState m) => HasHppState (ExceptT e m) where
+  getState = lift getState
+  {-# INLINE getState #-}
+  setState = lift . setState
+  {-# INLINE setState #-}
+
+-- * Resource cleanup
+
+-- | A cleanup action that is run at most once. To be used as an
+-- abstract type with only 'runCleanup' and 'mkCleanup' as interface.
+newtype Cleanup  = Cleanup (IORef (IO ()))
+
+-- | Runs an action and replaces it with a nop
+runCleanup :: Cleanup -> IO ()
+runCleanup (Cleanup r) = join (readIORef r) >> writeIORef r (return ())
+
+-- | @mkCleanup cleanup@ returns two things: a 'Cleanup' value, and an
+-- action to neutralize that 'Cleanup'. In this way, the 'Cleanup'
+-- value can be registered with a resource manager so that, in the
+-- event of an error, the cleanup action is run, while the neutralizer
+-- may be used to ensure that the registered 'Cleanup' action has no
+-- effect if it is run. Typically one would neutralize a registered
+-- cleanup action before performing a manual cleanup that subsumes the
+-- registered cleanup.
+mkCleanup :: IO () -> IO (Cleanup, IO ())
+mkCleanup m = do r <- newIORef m
+                 return $ (Cleanup r, writeIORef r (return ()))
+
+-- * Free Monad Transformers
+
+-- | Base functor for a free monad transformer
+data FreeF f a r = PureF a | FreeF (f r)
+
+instance Functor f => Functor (FreeF f a) where
+  fmap _ (PureF x) = PureF x
+  fmap f (FreeF x) = FreeF $ fmap f x
+  {-# INLINE fmap #-}
 
 -- * Pre-processor Actions
 
+-- | Dynamic state of the preprocessor engine.
+data HppState = HppState { hppConfig :: Config
+                         , hppLineNum :: LineNum
+                         , hppCleanups :: [Cleanup]
+                         , hppEnv :: Env }
+
 -- | A free monad construction to strictly delimit what capabilities
 -- we need to perform pre-processing.
-data Hpp a = Pure a
-           | ReadFile Int FilePath (String -> Hpp a)
-           | ReadNext Int FilePath (String -> Hpp a)
-           | GetConfig (Config -> Hpp a)
-           | SetConfig Config (Hpp a)
+data HppF t r = ReadFile Int FilePath (t -> r)
+              | ReadNext Int FilePath (t -> r)
+              | GetState (HppState -> r)
+              | SetState HppState r
+              | ThrowError Error
 
-instance Functor Hpp where
-  fmap f (Pure a) = Pure (f a)
-  fmap f (ReadFile ln file k) = ReadFile ln file (fmap f . k)
-  fmap f (ReadNext ln file k) = ReadNext ln file (fmap f . k)
-  fmap f (GetConfig k) = GetConfig (fmap f . k)
-  fmap f (SetConfig cfg k) = SetConfig cfg (fmap f k)
+instance Functor (HppF t) where
+  fmap f (ReadFile ln file k) = ReadFile ln file (f . k)
+  fmap f (ReadNext ln file k) = ReadNext ln file (f . k)
+  fmap f (GetState k) = GetState (f . k)
+  fmap f (SetState cfg k) = SetState cfg (f k)
+  fmap _ (ThrowError e) = ThrowError e
+  {-# INLINE fmap #-}
 
-instance Applicative Hpp where
-  pure = Pure
-  Pure f <*> Pure x = Pure (f x)
-  Pure f <*> ReadFile ln file k = ReadFile ln file (fmap f . k)
-  Pure f <*> ReadNext ln file k = ReadNext ln file (fmap f . k)
-  Pure f <*> GetConfig k = GetConfig (fmap f . k)
-  Pure f <*> SetConfig cfg k = SetConfig cfg (fmap f k)
-  ReadFile ln file k <*> x = ReadFile ln file ((<*> x) . k)
-  ReadNext ln file k <*> x = ReadNext ln file ((<*> x) . k)
-  GetConfig k <*> x = GetConfig ((<*> x) . k)
-  SetConfig cfg k <*> x = SetConfig cfg (k <*> x)
+-- * Hpp Monad Transformer
 
-instance Monad Hpp where
+-- | A free monad transformer specialized to HppF as the base functor.
+newtype HppT t m a = HppT { runHppT :: m (FreeF (HppF t) a (HppT t m a)) }
+
+instance Functor m => Functor (HppT t m) where
+  fmap f (HppT x) = HppT $ fmap f' x
+    where f' (PureF y) = PureF (f y)
+          f' (FreeF y) = FreeF $ fmap (fmap f) y
+  {-# INLINE fmap #-}
+
+instance Monad m => Applicative (HppT t m) where
+  pure = HppT . pure . PureF
+  {-# INLINE pure #-}
+  (<*>) = ap
+  {-# INLINE (<*>) #-}
+
+instance Monad m => Monad (HppT t m) where
   return = pure
-  Pure x >>= f = f x
-  ReadFile ln file k >>= f = ReadFile ln file ((>>= f) . k)
-  ReadNext ln file k >>= f = ReadNext ln file ((>>= f) . k)
-  GetConfig k >>= f = GetConfig ((>>= f) . k)
-  SetConfig cfg k >>= f = SetConfig cfg (k >>= f)
+  {-# INLINE return #-}
+  HppT ma >>= fb = HppT $ ma >>= \case
+                     PureF x -> runHppT $ fb x
+                     FreeF x -> return . FreeF $ fmap (>>= fb) x
+  {-# INLINE (>>=) #-}
 
--- | An 'Hpp' action that can fail.
-newtype ErrHpp a = ErrHpp { runErrHpp :: Hpp (Either (FilePath,Error) a) }
+instance MonadTrans (HppT t) where
+  lift = HppT . fmap PureF
+  {-# INLINE lift #-}
 
-instance Functor ErrHpp where
-  fmap f = ErrHpp . fmap (fmap f) . runErrHpp
+instance MonadIO m => MonadIO (HppT t m) where
+  liftIO = HppT . fmap PureF . liftIO
+  {-# INLINE liftIO #-}
 
-instance Applicative ErrHpp where
-  pure = ErrHpp . pure . pure
-  ErrHpp f <*> ErrHpp x =
-    ErrHpp $
-    do f >>= \case
-         Left err -> return (Left err)
-         Right f' -> do x >>= \case
-                          Left err' -> return (Left err')
-                          Right x' -> return (Right $ f' x')
+-- | An interpreter capability to modify dynamic state.
+class HasHppState m where
+  getState :: m HppState
+  setState :: HppState -> m ()
 
-instance Monad ErrHpp where
-  return = pure
-  ErrHpp x >>= fb = ErrHpp $ do x >>= \case
-                                  Left err -> return (Left err)
-                                  Right x' -> runErrHpp (fb x')
+instance Monad m => HasHppState (HppT t m) where
+  getState = HppT . pure . FreeF $ GetState pure
+  {-# INLINE getState #-}
+  setState s = HppT . pure . FreeF $ SetState s (pure ())
+  {-# INLINE setState #-}
+
+-- | An interpreter capability of threading a binding environment.
+class HasEnv m where
+  getEnv :: m Env
+  setEnv :: Env -> m ()
+
+instance Monad m => HasEnv (HppT t m) where
+  getEnv = fmap hppEnv getState
+  {-# INLINE getEnv #-}
+  setEnv e = getState >>= setState . (\s -> s { hppEnv = e })
+  {-# INLINE setEnv #-}
+
+instance Applicative m => HasError (HppT t m) where
+  throwError = HppT . pure . FreeF . ThrowError
+  {-# INLINE throwError #-}
+
+instance (HasEnv m, Monad m) => HasEnv (ExceptT e m) where
+  getEnv = lift getEnv
+  {-# INLINE getEnv #-}
+  setEnv = lift . setEnv
+  {-# INLINE setEnv #-}
 
 -- * Expansion
 
@@ -100,11 +186,7 @@ data Scan = Unmask String
           | Mask String
           | Scan Token
           | Rescan Token
-            deriving Show
-
--- | A difference list is a list representation with @O(1)@ @snoc@'ing at
--- the end of the list.
-type DList a = [a] -> [a]
+            deriving (Eq, Show)
 
 -- * Macros
 

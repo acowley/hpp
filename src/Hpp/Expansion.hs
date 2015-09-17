@@ -1,17 +1,22 @@
+{-# LANGUAGE RankNTypes, ScopedTypeVariables #-}
 -- | Line expansion is the core input token processing
 -- logic. Object-like macros are substituted, and function-like macro
 -- applications are expanded.
 module Hpp.Expansion (expandLine) where
-import Control.Arrow (first)
-import Control.Monad ((<=<))
+import Control.Monad (forM)
 import Data.Bool (bool)
+import Data.Foldable (foldl', traverse_)
 import Data.List (delete)
 import Data.Maybe (listToMaybe, mapMaybe)
-import Hpp.Config
-import Hpp.Env
-import Hpp.String
-import Hpp.Tokens
-import Hpp.Types
+import Hpp.Config (Config, curFileName,
+                   getDateString, getTimeString, prepDate, prepTime)
+import Hpp.Env (lookupKey, deleteKey)
+import Hpp.Streamer (source, mapTil)
+import Hpp.Parser (Parser, awaitP, liftP, precede, zoomParse,
+                   droppingWhile, awaitJust, replace, parse)
+import Hpp.String (stringify)
+import Hpp.Tokens (Token(..), notImportant, isImportant, detokenize)
+import Hpp.Types (HasError(..), HasEnv(..), Scan(..), Error(..), Macro(..))
 
 -- | Extract the 'Token' payload from a 'Scan'.
 unscan :: Scan -> Maybe Token
@@ -19,159 +24,170 @@ unscan (Scan t) = Just t
 unscan (Rescan t) = Just t
 unscan _ = Nothing
 
--- | Expand a single line of tokenized code.
-expandLine :: Config -> Int -> Env -> [Token]
-           -> Either Error (Env, [Token])
-expandLine cfg lineNum macros = fmap (\(e,ts) -> (e, mapMaybe unscan ts))
-                              . expandLine' cfg lineNum macros . map Scan
+isSpaceScan :: Scan -> Bool
+isSpaceScan = maybe False notImportant . unscan
+
+isImportantScan :: Scan -> Bool
+isImportantScan = maybe False isImportant . unscan
+
+-- | Expand all macros to the end of the current line or until all
+-- in-progress macro invocations are complete, whichever comes last.
+expandLine :: (HasError m, Monad m, HasEnv m)
+           => Config -> Int -> Parser m Token [Token]
+expandLine cfg lineNum = fmap (mapMaybe unscan) $
+                         zoomParse (mapTil Scan)
+                                   (expandLine' True cfg lineNum)
+
+expandLine' :: forall m. (HasError m, Monad m, HasEnv m)
+            => Bool -> Config -> Int -> Parser m Scan [Scan]
+expandLine' oneLine cfg lineNum = go id []
+  where go :: ([Scan] -> [Scan]) -> [String] -> Parser m Scan [Scan]
+        go acc mask = awaitP >>= maybe (return $ acc []) aux
+          where aux :: Scan -> Parser m Scan [Scan]
+                aux tok = case tok of
+                  Unmask name -> go (acc . (tok:)) (delete name mask)
+                  Mask name -> go (acc . (tok:)) (name : mask)
+                  Scan (Important t) -> do ts <- expandMacro cfg lineNum t tok
+                                           if ts == [tok]
+                                           then go (acc . (tok:)) mask
+                                           else do precede $ source ts
+                                                   go acc mask
+                  Rescan (Important t) ->
+                    do oldEnv <- liftP $
+                                 do env <- getEnv
+                                    setEnv $ foldl' (flip deleteKey) env mask
+                                    return env
+                       ts <- expandMacro cfg lineNum t tok
+                       liftP $ setEnv oldEnv
+                       if ts == [tok]
+                       then go (acc . (tok:)) mask
+                       else precede (source ts) >> go acc mask
+                  Scan (Other "\n")
+                    | oneLine -> return (acc [tok])
+                    | otherwise -> go (acc . (tok:)) mask
+                  Rescan (Other "\n")
+                    | oneLine -> return (acc [tok])
+                    | otherwise -> go (acc . (tok:)) mask
+                  _ -> go (acc . (tok:)) mask
+
+-- | Parse a function application. Arguments are separated by commas,
+-- and the application runs until the balanced closing parenthesis. If
+-- this is not an application, 'Nothing' is returned.
+appParse :: (Monad m, HasError m) => Parser m Scan (Maybe [[Scan]])
+appParse = droppingWhile isSpaceScan >> checkApp
+  where imp = maybe True notImportant . unscan
+        checkApp = do tok <- droppingWhile imp >> awaitP
+                      case tok >>= unscan of
+                        Just (Important "(") -> goApp
+                        _ -> traverse_ replace tok >> return Nothing
+        getArg acc = do arg <- fmap trimScan argParse
+                        tok <- awaitJust "appParse getArg"
+                        case unscan tok of
+                          Just (Important ")") -> return (acc [arg])
+                          _ -> replace tok >> getArg (acc . (arg:))
+        goApp = fmap Just (getArg id)
+
+-- | Emit the tokens of a single argument. Returns 'True' if this is
+-- the final argument in an application (indicated by an unbalanced
+-- closing parenthesis.
+argParse :: (Monad m, HasError m) => Parser m Scan [Scan]
+argParse = go id
+  where go acc = do tok <- awaitJust "argParse"
+                    case unscan tok of
+                      Just (Important s)
+                        | s == ")" -> replace tok >> return (acc [])
+                        | s == "," -> return (acc [])
+                        | s == "(" -> do ts <- fmap (tok:) parenthetical
+                                         go (acc . (ts++))
+                        | otherwise -> go (acc . (tok:))
+                      _ -> go (acc . (tok:))
+
+-- | Kick this off after an opening parenthesis and it will yield
+-- every token up to the closing parenthesis.
+parenthetical :: (Monad m, HasError m) => Parser m Scan [Scan]
+parenthetical = go id (1::Int)
+  where go acc 0 = return (acc [])
+        go acc n = do tok <- awaitJust "parenthetical"
+                      case unscan tok of
+                        Just (Important "(") -> go (acc . (tok:)) (n+1)
+                        Just (Important ")") -> go (acc . (tok:)) (n-1)
+                        _ -> go (acc . (tok:)) n
 
 argError :: Int -> String -> Int -> [String] -> Error
 argError lineNum name arity args =
   TooFewArgumentsToMacro lineNum $ name++"<"++show arity++">"++show args
 
--- | Returns the /used/ environment and the new token stream.
-expandFunction :: String -> Int -> ([([Scan],String)] -> [Scan])
-               -> ([String] -> Error)
-               -> ([Scan] -> Either Error [Scan])
-               -> [Scan]
-               -> Maybe (Either Error [Scan])
-expandFunction name arity f mkErr expand = aux <=< argParse
-  where aux :: ([[Scan]],[Scan]) -> Maybe (Either Error [Scan])
-        aux (args,rst)
-          | length args /= arity = Just . Left . mkErr
-                                 $ map (detokenize . mapMaybe unscan) args
-          | otherwise = Just $
-                        do args' <- mapM expand args
-                           let raw = map (detokenize . mapMaybe unscan) args
-                           return $ Mask name : f (zip args' raw) ++
-                                    Unmask name : rst
+-- | Returns 'Nothing' if this isn't an application; @Left args@ if we
+-- parsed arguments @args@, but there is an arity mismatch; or @Right
+-- tokens@ if the function application expanded successfully.
+expandFunction :: (Monad m, HasError m)
+               => String -> Int -> ([([Scan],String)] -> [Scan])
+               -> (forall r'. [String] -> Parser m Scan r')
+               -> Parser m Scan [Scan]
+               -> Parser m Scan (Maybe [Scan])
+expandFunction name arity f mkErr expand =
+  do margs <- appParse
+     case margs of
+       Nothing -> return Nothing
+       Just args
+         | length args /= arity -> mkErr $
+                                   map (detokenize . mapMaybe unscan) args
+         | otherwise ->
+           do args' <- forM args $ \arg -> liftP (parse expand (source arg))
+              let raw = map (detokenize . mapMaybe unscan) args
+              return . Just $ Mask name : f (zip args' raw) ++ [Unmask name]
 
-type EnvLookup = String -> Maybe (Macro, Env)
+lookupEnv :: (Monad m, HasEnv m)
+          => String -> Parser m i (Maybe Macro)
+lookupEnv s = liftP $ getEnv >>= traverse aux . lookupKey s
+  where aux (m, env') = setEnv env' >> return m
 
-expandMacro :: Config -> Int -> EnvLookup -> String -> Scan -> [Scan]
-            -> (DList Scan -> Maybe Env -> [Scan] -> Either Error r)
-            -> Either Error r
-expandMacro cfg lineNum env name tok ts k =
+expandMacro :: (Monad m, HasError m, HasEnv m)
+            => Config -> Int -> String -> Scan -> Parser m Scan [Scan]
+expandMacro cfg lineNum name tok =
   case name of
     "__LINE__" -> simple $ show lineNum
     "__FILE__" -> simple . stringify $ curFileName cfg
     "__DATE__" -> simple . stringify . getDateString $ prepDate cfg
     "__TIME__" -> simple . stringify . getTimeString $ prepTime cfg
-    _ -> case env name of
-           Nothing -> k (tok:) Nothing ts
-           Just (m,env') ->
-             case m of
-               Object t' ->
-                 let expansion = Mask name
-                               : map Rescan (spaced t')
-                               ++ [Unmask name]
-                 in k id (Just env') (expansion++ts)
-               Function arity f ->
-                 let ex = fmap snd
-                        . expandLine' cfg lineNum (deleteKey name env')
-                     err = argError lineNum name arity
-                 in case expandFunction name arity f err ex ts of
-                      Nothing -> k (tok:) (Just env') ts
-                      -- FIXME: Missing call to spaced?
-                      Just ts' ->
-                        do tsEx <- ts'
-                           k id (Just env') tsEx
-  where simple s = k (Rescan (Important s):) Nothing ts
+    _ -> do mm <- lookupEnv name
+            case mm of
+              Nothing -> return [tok]
+              Just m ->
+                case m of
+                  Object t' ->
+                    return $ Mask name : map Rescan (spaced t') ++ [Unmask name]
+                  Function arity f ->
+                    let ex = expandLine' False cfg lineNum
+                        err = liftP . throwError
+                            . argError lineNum name arity
+                    in do mts <- expandFunction name arity f err ex
+                          case mts of
+                            Nothing -> return [tok]
+                            Just ts -> return ts
+  where simple s = return [Rescan (Important s)]
         -- Avoid accidentally merging tokens like @'-'@
-        spaced xs = pre xs ++ pos
+        spaced xs = pre ++ pos
           where importantChar (Important [c]) = elem c oops
                 importantChar _ = False
-                pre = bool id (Other " ":)$
+                pre = bool xs (Other " ":xs)$
                       (maybe False importantChar $ listToMaybe xs)
                 pos = bool [] [Other " "] $
                       (maybe False importantChar $ listToMaybe (reverse xs))
                 oops = "-+*.><"
 
-withMask :: Eq a => [a] -> (a -> Maybe b) -> a -> Maybe b
-withMask mask f = \x -> if elem x mask then Nothing else f x
-
--- | Expand all macros on a /non-directive/ line. If there is a problem
--- expanding a macro (this will typically be a macro function), the
--- name of the name of the problematic macro is returned.
-expandLine' :: Config -> Int -> Env -> [Scan]
-           -> Either Error (Env, [Scan])
-expandLine' cfg lineNum macros = go macros id []
-  where go :: Env -> DList Scan -> [String] -> [Scan]
-           -> Either Error (Env, [Scan])
-        go env acc _ [] = Right (env, acc [])
-        go env acc mask (tok@(Unmask name) : ts) =
-          go env (acc . (tok:)) (delete name mask) ts
-        go env acc mask (tok@(Mask name) : ts) =
-          go env (acc . (tok:)) (name:mask) ts
-        go env acc mask (tok@(Rescan (Important t)) : ts) =
-          let envMasked = withMask mask (flip lookupKey env)
-          in expandMacro cfg lineNum envMasked t tok ts $ \fAcc _ ts' ->
-             go env (acc . fAcc) mask  ts'
-        go env acc mask (tok@(Scan (Important t)) : ts) =
-          let envLook = flip lookupKey env
-          in expandMacro cfg lineNum envLook t tok ts $ \fAcc env' ts' ->
-             go (maybe env id env') (acc . fAcc) mask ts'
-        go env acc mask (t:ts) = go env (acc . (t:)) mask ts
-
--- | @breakBalance end tokens@ uses the first element of @tokens@ as
--- the start of a balanced pair, and @end@ as the end of such a
--- pair. It breaks @tokens@ into a prefix with as many @end@ as start
--- tokens, and the remaining tokens.
-breakBalance :: (a -> Bool) -> (a -> Bool) -> [a] -> Maybe ([a],[a])
-breakBalance _ _ [] = Nothing
-breakBalance start end ts0 = go (1::Int) id ts0
-  where go 0 acc ts = Just (acc [], ts)
-        go _ _ [] = Nothing
-        go n acc (t:ts)
-          | end t = go (n-1) (acc . (t:)) ts
-          | start t = go (n+1) (acc . (t:)) ts
-          | otherwise = go n (acc . (t:)) ts
-
 -- | Trim whitespace from both ends of a sequence of 'Scan' tokens.
 trimScan :: [Scan] -> [Scan]
 trimScan [] = []
-trimScan (Scan (Other _):ts) = trimScan ts
-trimScan (Rescan (Other _):ts) = trimScan ts
-trimScan (t@(Rescan (Important _)) : ts) = t : trimScanAux Nothing ts
-trimScan (t@(Scan (Important _)) : ts) = t : trimScanAux Nothing ts
-trimScan (t@(Mask _) : ts) = t : trimScan ts
-trimScan (t@(Unmask _) : ts) = t : trimScan ts
+trimScan (t:ts) | isSpaceScan t = trimScan ts
+                | isImportantScan t = t : trimScanAux Nothing ts
+                | otherwise = t : trimScan ts
 
 -- | Collapse internal whitespace to single spaces, and trim trailing
 -- space.
 trimScanAux :: Maybe Scan -> [Scan] -> [Scan]
 trimScanAux _ [] = []
-trimScanAux _ (Scan (Other _) : ts) = trimScanAux (Just (Scan (Other " "))) ts
-trimScanAux _ (Rescan (Other _) : ts) = trimScanAux (Just (Scan (Other " "))) ts
-trimScanAux spc (t@(Mask _) : ts) = t : trimScanAux spc ts
-trimScanAux spc (t@(Unmask _) : ts) = t : trimScanAux spc ts
-trimScanAux spc (t:ts) = maybe [] (:[]) spc ++  (t : trimScanAux Nothing ts)
-
--- | Parse a function application. Arguments are separated by commas,
--- and the application runs until a closing parenthesis. The input
--- stream should begin immediately /after/ the opening parenthesis.
-argParse :: [Scan] -> Maybe ([[Scan]], [Scan])
-argParse = fmap (first (map trimScan))
-         . go id id
-       <=< isApplication
-         . dropWhile (maybe True not . fmap isImportant . unscan)
-  where go accArgs accArg (t@(Scan (Important s)):ts) =
-          aux accArgs accArg t ts s
-        go accArgs accArg (t@(Rescan (Important s)):ts) =
-          aux accArgs accArg t ts s
-        go accArgs accArg (t : ts) = go accArgs (accArg . (t:)) ts
-        go _ _ [] = Nothing
-        aux accArgs accArg t ts s =
-          case s of 
-            ")" -> Just (accArgs [accArg []], ts)
-            "," -> go (accArgs . (accArg [] :)) id ts
-            "(" -> case breakBalance (isTok "(") (isTok ")") ts of
-                     Nothing -> Nothing
-                     Just (arg,ts') -> go accArgs (accArg . (t:) . (arg++)) ts'
-            _ -> go accArgs (accArg . (t:)) ts
-        isApplication (Scan (Important "("):ts) = Just ts
-        isApplication (Rescan (Important "("):ts) = Just ts
-        isApplication _ = Nothing
-        isTok t (Scan (Important s)) = t == s
-        isTok t (Rescan (Important s)) = t == s
-        isTok _ _ = False
+trimScanAux spc (t : ts)
+  | isSpaceScan t = trimScanAux (Just (Scan (Other " "))) ts
+  | isImportantScan t = maybe [] (:[]) spc ++ (t : trimScanAux Nothing ts)
+  | otherwise = t : trimScanAux spc ts

@@ -1,15 +1,17 @@
+{-# LANGUAGE RankNTypes #-} 
 -- | A front-end to run Hpp with textual arguments as from a command
 -- line invocation.
 module Hpp.CmdLine (runWithArgs) where
-import Control.Monad (join, unless)
+import Control.Monad (unless)
 import Hpp
 import Hpp.Config
-import Hpp.Env (Env, deleteKey)
+import Hpp.Env (deleteKey, emptyEnv, insertPair)
 import Hpp.Tokens
-import Hpp.Types (Error(..))
-import System.Directory (doesFileExist)
-import System.FilePath (splitFileName)
+import Hpp.Types (Env, Error(..))
+import System.Directory (doesFileExist, makeAbsolute)
 
+-- | Break a string on an equals sign. For example, the string @x=y@
+-- is broken into @[x,"=",y]@.
 breakEqs :: String -> [String]
 breakEqs = aux . break (== '=')
   where aux (h,[]) = [h]
@@ -28,7 +30,7 @@ splitSwitches x = [x]
 -- FIXME: Defining function macros probably doesn't work here.
 parseArgs :: ConfigF Maybe -> [String]
           -> IO (Either Error (Env, [String], Config, Maybe FilePath))
-parseArgs cfg0 = go [] id cfg0 Nothing . concatMap breakEqs
+parseArgs cfg0 = go emptyEnv id cfg0 Nothing . concatMap breakEqs
   where go env acc cfg out [] =
           case realizeConfig cfg of
             Just cfg' -> return (Right (env, acc [], cfg', out))
@@ -36,11 +38,11 @@ parseArgs cfg0 = go [] id cfg0 Nothing . concatMap breakEqs
         go env acc cfg out ("-D":name:"=":body:rst) =
           case parseDefinition (Important name : Other " " : tokenize body) of
             Nothing -> return . Left $ BadMacroDefinition 0
-            Just def -> go (def:env) acc cfg out rst
+            Just def -> go (insertPair def env) acc cfg out rst
         go env acc cfg out ("-D":name:rst) =
           case parseDefinition ([Important name, Other " ", Important "1"]) of
             Nothing -> return . Left $ BadMacroDefinition 0
-            Just def -> go (def:env) acc cfg out rst
+            Just def -> go (insertPair def env) acc cfg out rst
         go env acc cfg out ("-U":name:rst) =
           go (deleteKey name env) acc cfg out rst
         go env acc cfg out ("-I":dir:rst) =
@@ -54,8 +56,7 @@ parseArgs cfg0 = go [] id cfg0 Nothing . concatMap breakEqs
           in go env acc cfg' out rst
         go env acc cfg out ("--cpp":rst) =
           let cfg' = cfg { spliceLongLinesF = Just True
-                         , eraseCCommentsF = Just True
-                         , spliceApplicationsF = Just True }
+                         , eraseCCommentsF = Just True }
               defs = concatMap ("-D":)
                        [ ["__STDC__"]
                          -- __STDC_VERSION__ is only defined in C94 and later
@@ -66,8 +67,6 @@ parseArgs cfg0 = go [] id cfg0 Nothing . concatMap breakEqs
           go env acc (cfg { spliceLongLinesF = Just True }) out rst
         go env acc cfg out ("--ferase-comments":rst) =
           go env acc (cfg { eraseCCommentsF = Just True }) out rst
-        go env acc cfg out ("--fapplication-splice":rst) =
-          go env acc (cfg { spliceApplicationsF = Just True }) out rst
         go env acc cfg _ ("-o":file:rst) =
           go env acc cfg (Just file) rst
         go env acc cfg out ("-x":_lang:rst) =
@@ -79,6 +78,7 @@ parseArgs cfg0 = go [] id cfg0 Nothing . concatMap breakEqs
         go _ _ _ (Just _) _ =
           return . Left $ BadCommandLine "Multiple output files given"
 
+-- | Run Hpp with the given commandline arguments.
 runWithArgs :: [String] -> IO ()
 runWithArgs args =
   do cfgNow <- defaultConfigFNow
@@ -88,12 +88,13 @@ runWithArgs args =
      exists <- doesFileExist (curFileName cfg)
      unless exists . error $
        "Couldn't open input file: "++curFileName cfg
-     let (_dir,fileName) = splitFileName $ curFileName cfg
+     let fileName = curFileName cfg
          cfg' = cfg { curFileNameF = pure fileName }
-     join . runErrHppIO cfg' $
-       do src <- liftHpp . hppReadFile 0
-                 $ '"' : curFileName cfg ++ "\""
-          (_,r) <- preprocess env (unlines lns ++ src)
-          case outPath of
-            Nothing -> return (putStrLn r)
-            Just f -> return (writeFile f r)
+     snk <- case outPath of
+              Nothing -> pure sinkToStdOut
+              Just f -> fmap (\f' -> sinkToFile hppRegisterCleanup f')
+                             (makeAbsolute f)
+     _ <- hppIO cfg' env
+            (preprocess (before (source lns) (streamHpp fileName)))
+            snk
+     return ()

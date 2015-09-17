@@ -15,15 +15,34 @@ data Token = Important String
 detok :: Token -> String
 detok (Important s) = s
 detok (Other s) = s
+{-# INLINE detok #-}
 
 -- | 'True' if the given 'Token' is 'Important'; 'False' otherwise.
 isImportant :: Token -> Bool
 isImportant (Important _) = True
 isImportant _ = False
 
+-- | 'True' if the given 'Token' is /not/ 'Important'; 'False'
+-- otherwise.
+notImportant :: Token -> Bool
+notImportant (Other _) = True
+notImportant _ = False
+
 -- | Return the contents of only 'Important' (non-space) tokens.
 importants :: [Token] -> [String]
 importants = map detok . filter isImportant
+
+-- | Trim 'Other' 'Token's from both ends of a list of 'Token's.
+trimUnimportant :: [Token] -> [Token]
+trimUnimportant = aux id . dropWhile (not . isImportant)
+  where aux _ [] = []
+        aux acc (t@(Important _) : ts) = acc (t : aux id ts)
+        aux acc (t@(Other _) : ts) = aux (acc . (t:)) ts
+
+-- | Is a 'Token' a newline character?
+newLine :: Token -> Bool
+newLine (Other "\n") = True
+newLine _ = False
 
 -- | Break a 'String' into space and non-whitespace runs.
 tokWords :: String -> [Token]
@@ -43,17 +62,16 @@ tokWords (c:cs)
 
 -- | If you encounter a string literal, call this helper with a
 -- double-barreled continuation and the rest of your input. The
--- continuation will be called with the remainder of the string
--- literal as the first argument, and the remaining input as the
--- second argument.
+-- continuation will expect the remainder of the string literal as the
+-- first argument, and the remaining input as the second argument.
 skipLiteral :: ((String -> String) -> String -> r) -> String -> r
 skipLiteral k = go ('"':)
   where go acc ('\\':'\\':cs) = go (acc . ("\\\\"++)) cs
         go acc ('\\':'"':cs) = go (acc . ("\\\""++)) cs
-        -- go acc (c:'"':cs) = k (acc . ([c,'"']++)) cs
         go acc ('"':cs) = k (acc . ('"':)) cs
         go acc (c:cs) = go (acc . (c :)) cs
         go acc [] = k acc []
+{-# INLINE skipLiteral #-}
 
 -- | @splits isDelimiter str@ tokenizes @str@ using @isDelimiter@ as a
 -- delimiter predicate. Leading whitespace is also stripped from
@@ -94,3 +112,4 @@ tokenize = fixExponents . concatMap seps . tokWords
 -- . tokenize == id@.
 detokenize :: [Token] -> String
 detokenize = concatMap detok
+{-# INLINE detokenize #-}
