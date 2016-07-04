@@ -1,3 +1,7 @@
+# 0.3.1
+
+Address a change wherein GHC 8 will pass `-include` arguments without a space between "-include" and the file to be included.
+
 # 0.3
 
 Switch to a stream processing model.

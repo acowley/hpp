@@ -1,4 +1,4 @@
-{-# LANGUAGE RankNTypes #-} 
+{-# LANGUAGE RankNTypes #-}
 -- | A front-end to run Hpp with textual arguments as from a command
 -- line invocation.
 module Hpp.CmdLine (runWithArgs) where
@@ -25,6 +25,7 @@ splitSwitches ('-':'I':t@(_:_)) = ["-I",t]
 splitSwitches ('-':'D':t@(_:_)) = ["-D",t]
 splitSwitches ('-':'U':t@(_:_)) = ["-U",t]
 splitSwitches ('-':'o':t@(_:_)) = ["-o",t]
+splitSwitches ('-':'i':'n':'c':'l':'u':'d':'e':t@(_:_)) = ["-include",t]
 splitSwitches x = [x]
 
 -- FIXME: Defining function macros probably doesn't work here.
