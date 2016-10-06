@@ -5,7 +5,7 @@ FILE='mcpp-2.7.2.tar.gz'
 GCC=gcc
 
 # Note: head -n -1 would be faster than "sed '$ d'", but doesn't work
-# with BSD or OS X head. 
+# with BSD or OS X head.
 
 # Get the include paths GCC will use by default.
 GCCDIR=($(echo | ${GCC} -E -v - 2>&1 | sed -n '/#include <...> search starts/,/End of search list/ p' | tail -n +2 | sed '$ d' | grep -v '(framework directory)' | sed 's/^[[:space:]]*//'))
@@ -32,7 +32,7 @@ if ! [ -f tool/cpp_test ]; then
 fi
 
 echo 'Building hpp'
-(cd .. && cabal build)
+(cd .. && stack build hpp:hpp)
 if ! [ $? -eq 0 ]; then
   echo 'Building hpp failed'
   exit 1
@@ -48,7 +48,7 @@ echo 'Running the validation suite'
 # Note that we define __i386__ as the architecture as the MCPP
 # validation test n_12.c assumes a long is 32 bits.
 
-(cd mcpp-2.7.2/test-c &&  ../tool/cpp_test HPP "../../../dist/build/hpp/hpp -I/usr/include ${GCCDIR} --cpp -D__i386__ -D__DARWIN_ONLY_UNIX_CONFORMANCE %s.c | gcc -o %s -w -x c -" "rm %s" < n_i_.lst)
+(cd mcpp-2.7.2/test-c &&  ../tool/cpp_test HPP "$(cd ../../.. && stack exec which -- hpp) -I/usr/include ${GCCDIR} --cpp -D__i386__ -D__DARWIN_ONLY_UNIX_CONFORMANCE %s.c | gcc -o %s -w -x c -" "rm %s" < n_i_.lst)
 
 if ! [ $? -eq 0 ]; then
   echo 'The test runner exited with an error.'

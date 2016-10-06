@@ -47,6 +47,7 @@ breakOn needle haystack = go 0 haystack
         go !i xs@(_:xs')
           | needle `isPrefixOf` xs = (take i haystack, xs)
           | otherwise = go (i+1) xs'
+{-# INLINE breakOn #-}
 
 -- | Used to make switching to the @text@ package easier.
 cons :: a -> [a] -> [a]

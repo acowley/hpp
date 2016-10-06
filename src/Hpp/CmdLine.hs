@@ -9,6 +9,7 @@ import Hpp.Env (deleteKey, emptyEnv, insertPair)
 import Hpp.Tokens
 import Hpp.Types (Env, Error(..))
 import System.Directory (doesFileExist, makeAbsolute)
+import System.IO (openFile, IOMode(..), hPutStr, hClose)
 
 -- | Break a string on an equals sign. For example, the string @x=y@
 -- is broken into @[x,"=",y]@.
@@ -57,21 +58,27 @@ parseArgs cfg0 = go emptyEnv id cfg0 Nothing . concatMap breakEqs
           in go env acc cfg' out rst
         go env acc cfg out ("--cpp":rst) =
           let cfg' = cfg { spliceLongLinesF = Just True
-                         , eraseCCommentsF = Just True }
+                         , eraseCCommentsF = Just True
+                         , inhibitLinemarkersF = Just False
+                         , replaceTrigraphsF = Just True }
               defs = concatMap ("-D":)
                        [ ["__STDC__"]
                          -- __STDC_VERSION__ is only defined in C94 and later
-                       , ["__STDC_VERSION__","=","199409L"]
-                       , ["_POSIX_C_SOURCE","=","200112L"] ]
+                       , ["__STDC_VERSION__","=","199409L"] ]
+                       -- , ["_POSIX_C_SOURCE","=","200112L"] ]
           in go env acc cfg' out (defs ++ rst)
         go env acc cfg out ("--fline-splice":rst) =
           go env acc (cfg { spliceLongLinesF = Just True }) out rst
         go env acc cfg out ("--ferase-comments":rst) =
           go env acc (cfg { eraseCCommentsF = Just True }) out rst
+        go env acc cfg out ("--freplace-trigraphs":rst) =
+          go env acc (cfg { replaceTrigraphsF = Just True }) out rst
         go env acc cfg _ ("-o":file:rst) =
           go env acc cfg (Just file) rst
         go env acc cfg out ("-x":_lang:rst) =
           go env acc cfg out rst -- We ignore source language specification
+        go env acc cfg out ("-traditional":rst) =
+          go env acc cfg out rst -- Ignore the "-traditional" flag
         go env acc cfg Nothing (file:rst) =
           case curFileNameF cfg of
             Nothing -> go env acc (cfg { curFileNameF = Just file }) Nothing rst
@@ -91,11 +98,16 @@ runWithArgs args =
        "Couldn't open input file: "++curFileName cfg
      let fileName = curFileName cfg
          cfg' = cfg { curFileNameF = pure fileName }
-     snk <- case outPath of
-              Nothing -> pure sinkToStdOut
-              Just f -> fmap (\f' -> sinkToFile hppRegisterCleanup f')
-                             (makeAbsolute f)
-     _ <- hppIO cfg' env
-            (preprocess (before (source lns) (streamHpp fileName)))
-            snk
-     return ()
+     (snk, closeSnk) <- case outPath of
+                          Nothing -> return (mapM_ putStr, return ())
+                          Just f ->
+                            do h <- makeAbsolute f >>=
+                                    flip openFile WriteMode
+                               return (\os -> mapM_ (hPutStr h) os
+                                      ,hClose h)
+     _ <- (lines <$> readFile fileName)
+           >>= hppIO cfg' env snk . (lns ++)
+     -- lns' <- (lines <$> readFile fileName)
+     --          >>= hppFileContents cfg env fileName . (lns ++)
+     -- snk lns'
+     closeSnk

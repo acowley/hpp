@@ -22,6 +22,7 @@ data ConfigF f = Config { curFileNameF        :: f FilePath
                         , spliceLongLinesF    :: f Bool
                         , eraseCCommentsF     :: f Bool
                         , inhibitLinemarkersF :: f Bool
+                        , replaceTrigraphsF   :: f Bool
                         , prepDateF           :: f DateString
                         , prepTimeF           :: f TimeString }
 
@@ -35,10 +36,11 @@ realizeConfig (Config (Just fileName)
                       (Just spliceLines)
                       (Just comments)
                       (Just inhibitLines)
+                      (Just trigraphs)
                       (Just pdate)
                       (Just ptime)) =
   Just (Config (pure fileName) (pure paths) (pure spliceLines) (pure comments)
-               (pure inhibitLines) (pure pdate) (pure ptime))
+               (pure inhibitLines) (pure trigraphs) (pure pdate) (pure ptime))
 realizeConfig _ = Nothing
 
 -- | Extract the current file name from a configuration.
@@ -61,6 +63,10 @@ eraseCComments = runIdentity . eraseCCommentsF
 inhibitLinemarkers :: Config -> Bool
 inhibitLinemarkers = runIdentity . inhibitLinemarkersF
 
+-- | Determine if trigraph sequences should be replaced.
+replaceTrigraphs :: Config -> Bool
+replaceTrigraphs = runIdentity . replaceTrigraphsF
+
 -- | The date the pre-processor was run on.
 prepDate :: Config -> DateString
 prepDate = runIdentity . prepDateF
@@ -72,7 +78,7 @@ prepTime = runIdentity . prepTimeF
 -- | A default configuration with no current file name set.
 defaultConfigF :: ConfigF Maybe
 defaultConfigF = Config Nothing (Just [])
-                        (Just False) (Just False) (Just False)
+                        (Just True) (Just True) (Just True) (Just False)
                         (Just (DateString "??? ?? ????"))
                         (Just (TimeString "??:??:??"))
 

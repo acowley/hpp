@@ -13,3 +13,31 @@ To implement the type-aligned sequence, we can unsafely reuse
 
 Here is a [[https://github.com/ekmett/machines/issues/68][GitHub issue]] sketching how to port the =machines= library to
 a remorseless framework in order to merge the `Plan` and `Machine` types.
+
+* Overall Control Flow
+
+** Free monads in the streets
+We expect control to follow from the type
+
+#+BEGIN_SRC haskell
+HppT [String] (ParserT IO [String]) [String]
+#+END_SRC
+
+The output is a little tricky, actually. I don't want to produce a big list of output; I want to sink it incrementally as it is produced.
+
+One option is to equip ~HppF~ with a ~FlushOutput t r~ variant, and then have the interpreter, ~runHpp~ do the writing.
+
+
+A catch here is that ~directive~, while ostensibly a ~Parser~ wants to poke at the ~HppState~.
+
+** Bad Ideas
+*** Orrrr
+
+ Turning things around completely to have,
+
+ #+BEGIN_SRC haskell
+ParserT (HppT [String] IO) [String] [String]
+ #+END_SRC
+
+*** Review
+ ~HppT~ on the outside appeals to me because then the explicit interpreter drives the whole operation. It also makes some sense that it feeds the parser rather than having the parser's state be informed by the inner monad.

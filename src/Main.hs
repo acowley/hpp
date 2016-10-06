@@ -25,12 +25,17 @@ usage = mapM_ putStrLn
   , "  Like -include, except that output is discarded. Only"
   , "  macro definitions are kept."
   , "--cpp"
-  , "  C98 compatibility. Implies: --fline-splice --ferase-comments"
+  , "  C98 compatibility."
+  , "  Implies: --fline-splice --ferase-comments --freplace-trigraphs"
   , "  -D __STDC__  -D __STDC_VERSION__=199409L -D _POSIX_C_SOURCE=200112L"
+  , "-P"
+  , "  Inhibit #line markers (when this option is given after --cpp)"
   , "--fline-splice"
   , "  Enable continued line splicing."
   , "--ferase-comments"
-  , "  Remove all C-style comments before processing." ]
+  , "  Remove all C-style comments before processing."
+  , "--freplace-trigraphs"
+  , "  Replace trigraph sequences before processing." ]
 
 main :: IO ()
 main = do getArgs >>= \case
@@ -46,6 +51,6 @@ hpp -I/usr/local/include -I/usr/include -fline-splice -ferase-comments -D __x86_
 
 For the mcpp validation suite
 
-../tool/cpp_test HPP "../../dist/build/hpp/hpp -I/usr/local/include -I/usr/include -fline-splice -ferase-comments -D __x86_64__ -D __GNUC__=4 -D __STDC__ -D __STDC_VERSION__=199409L -D _POSIX_C_SOURCE -D __DARWIN_ONLY_UNIX_CONFORMANCE %s.c | gcc -o %s -x c -" "rm %s" < n_i_.lst 
+../tool/cpp_test HPP "../../dist/build/hpp/hpp -I/usr/local/include -I/usr/include -fline-splice -ferase-comments -D __x86_64__ -D __GNUC__=4 -D __STDC__ -D __STDC_VERSION__=199409L -D _POSIX_C_SOURCE -D __DARWIN_ONLY_UNIX_CONFORMANCE %s.c | gcc -o %s -x c -" "rm %s" < n_i_.lst
 
 -}

@@ -1,5 +1,5 @@
 name:                hpp
-version:             0.3.1.0
+version:             0.4.0
 synopsis:            A Haskell pre-processor
 
 description: @hpp@ is a Haskell pre-processor that is also a
@@ -40,7 +40,7 @@ license:             BSD3
 license-file:        LICENSE
 author:              Anthony Cowley
 maintainer:          acowley@gmail.com
-copyright:           (C) 2015 Anthony Cowley
+copyright:           (C) 2015-2016 Anthony Cowley
 category:            Development
 build-type:          Simple
 extra-source-files:  tests/mcpp-validation.sh, CHANGELOG.md
@@ -58,8 +58,6 @@ library
                        Hpp.Expansion,
                        Hpp.Expr,
                        Hpp.Parser,
-                       Hpp.Streamer,
-                       Hpp.StreamIO,
                        Hpp.String,
                        Hpp.Tokens,
                        Hpp.Types
@@ -67,9 +65,7 @@ library
                        transformers >=0.4
   hs-source-dirs:      src
   default-language:    Haskell2010
-  ghc-options: -Wall -fno-full-laziness
-  -- ghc-options: -Wall -fprof-auto -fno-full-laziness -ddump-simpl -ddump-to-file
---  -ddump-simpl-stats
+  ghc-options: -Wall
 
 executable hpp
   main-is:             src/Main.hs
