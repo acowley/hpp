@@ -1,3 +1,12 @@
+# 0.4.0
+
+- Simplify the parsing machinery
+- Don't remove C++-style single-line comments
+- Don't error on unknown cpp directives
+  Previously, a line beginning with "#-}" would cause an error
+- Don't do trigraph replacement by default.
+  Haskell allows "??" in operator names and you can be sure `lens` uses it!
+
 # 0.3.1
 
 Address a change wherein GHC 8 will pass `-include` arguments without a space between "-include" and the file to be included.
