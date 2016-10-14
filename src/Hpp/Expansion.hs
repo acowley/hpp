@@ -1,4 +1,4 @@
-{-# LANGUAGE LambdaCase, RankNTypes, ScopedTypeVariables #-}
+{-# LANGUAGE LambdaCase, OverloadedStrings, RankNTypes, ScopedTypeVariables #-}
 -- | Line expansion is the core input token processing
 -- logic. Object-like macros are substituted, and function-like macro
 -- applications are expanded.
@@ -8,17 +8,21 @@ import Data.Bool (bool)
 import Data.Foldable (foldl', traverse_)
 import Data.List (delete)
 import Data.Maybe (listToMaybe, mapMaybe)
+import Data.Monoid ((<>))
+import Data.String (fromString)
 import Hpp.Config (Config, curFileName,
                    getDateString, getTimeString, prepDate, prepTime)
 import Hpp.Env (lookupKey, deleteKey)
 import Hpp.Parser (Parser, ParserT, precede, replace, await, onIsomorphism,
                    onElements, droppingWhile, awaitJust, evalParse)
-import Hpp.String (stringify)
+import Hpp.StringSig (stringify, uncons, isEmpty, toChars)
 import Hpp.Tokens (Token(..), notImportant, isImportant, detokenize)
-import Hpp.Types (HasError(..), HasEnv(..), Scan(..), Error(..), Macro(..))
+import Hpp.Types (HasError(..), HasEnv(..), Scan(..), Error(..), Macro(..),
+                  TOKEN, String)
+import Prelude hiding (String)
 
--- | Extract the 'Token' payload from a 'Scan'.
-unscan :: Scan -> Maybe Token
+-- | Extract the 'TOKEN' payload from a 'Scan'.
+unscan :: Scan -> Maybe TOKEN
 unscan (Scan t) = Just t
 unscan (Rescan t) = Just t
 unscan _ = Nothing
@@ -32,7 +36,7 @@ isImportantScan = maybe False isImportant . unscan
 -- | Expand all macros to the end of the current line or until all
 -- in-progress macro invocations are complete, whichever comes last.
 expandLine :: (HasError m, Monad m, HasEnv m)
-           => Config -> Int -> Parser m [Token] [Token]
+           => Config -> Int -> Parser m [TOKEN] [TOKEN]
 expandLine cfg lineNum =
   mapMaybe unscan <$>
   onElements (onIsomorphism Scan unscan (expandLine' True cfg lineNum))
@@ -114,7 +118,8 @@ parenthetical = go id (1::Int)
 
 argError :: Int -> String -> Int -> [String] -> Error
 argError lineNum name arity args =
-  TooFewArgumentsToMacro lineNum $ name++"<"++show arity++">"++show args
+  TooFewArgumentsToMacro lineNum $
+  toChars name <> "<" <> show arity <> ">" <> show args
 
 -- | Returns 'Nothing' if this isn't an application; @Left args@ if we
 -- parsed arguments @args@, but there is an arity mismatch; or @Right
@@ -145,10 +150,10 @@ expandMacro :: (Monad m, HasError m, HasEnv m)
             => Config -> Int -> String -> Scan -> ParserT m src Scan [Scan]
 expandMacro cfg lineNum name tok =
   case name of
-    "__LINE__" -> simple $ show lineNum
-    "__FILE__" -> simple . stringify $ curFileName cfg
-    "__DATE__" -> simple . stringify . getDateString $ prepDate cfg
-    "__TIME__" -> simple . stringify . getTimeString $ prepTime cfg
+    "__LINE__" -> simple . fromString $ show lineNum
+    "__FILE__" -> simple . stringify . fromString $ curFileName cfg
+    "__DATE__" -> simple . stringify . fromString . getDateString $ prepDate cfg
+    "__TIME__" -> simple . stringify . fromString . getTimeString $ prepTime cfg
     _ -> do mm <- lookupEnv name
             case mm of
               Nothing -> return [tok]
@@ -167,14 +172,17 @@ expandMacro cfg lineNum name tok =
                             Just ts -> return ts
   where simple s = return [Rescan (Important s)]
         -- Avoid accidentally merging tokens like @'-'@
-        spaced xs = pre ++ pos
-          where importantChar (Important [c]) = elem c oops
+        spaced xs = pre <> pos
+          where importantChar (Important t) =
+                  case uncons t of
+                    Nothing -> False
+                    Just (c,t') -> elem c oops && isEmpty t'
                 importantChar _ = False
                 pre = bool xs (Other " ":xs)$
                       (maybe False importantChar $ listToMaybe xs)
                 pos = bool [] [Other " "] $
                       (maybe False importantChar $ listToMaybe (reverse xs))
-                oops = "-+*.><"
+                oops = "-+*.><" :: [Char]
 
 -- | Trim whitespace from both ends of a sequence of 'Scan' tokens.
 trimScan :: [Scan] -> [Scan]

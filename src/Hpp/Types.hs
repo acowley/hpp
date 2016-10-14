@@ -6,19 +6,26 @@ import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Trans.Class (MonadTrans, lift)
 import Control.Monad.Trans.Except (ExceptT, throwE)
 import Control.Monad.Trans.State.Strict (StateT, get, put)
+import Data.ByteString.Lazy.Char8 (ByteString)
 import Data.Functor.Constant
 import Data.Functor.Identity
 -- import qualified Data.Map as M
 import Hpp.Config
 import Hpp.Env (emptyEnv, lookupKey)
+import Hpp.StringSig (toChars)
 import Hpp.Tokens
+import Prelude hiding (String)
+import qualified Prelude as P
 
 -- | Line numbers are represented as 'Int's
 type LineNum = Int
-
 -- | A macro binding environment.
 type Env = [(String, Macro)]
 -- type Env = M.Map String Macro
+
+-- * Changing the underlying string type
+type String = ByteString
+type TOKEN = Token ByteString
 
 -- * Errors
 
@@ -26,15 +33,15 @@ type Env = [(String, Macro)]
 data Error = UnterminatedBranch
            | BadMacroDefinition LineNum
            | BadIfPredicate
-           | BadLineArgument LineNum String
+           | BadLineArgument LineNum P.String
            | IncludeDoesNotExist LineNum FilePath
            | FailedInclude LineNum FilePath
-           | UserError LineNum String
-           | UnknownCommand LineNum String
-           | TooFewArgumentsToMacro LineNum String
-           | BadMacroArguments LineNum String
+           | UserError LineNum P.String
+           | UnknownCommand LineNum P.String
+           | TooFewArgumentsToMacro LineNum P.String
+           | BadMacroArguments LineNum P.String
            | NoInputFile
-           | BadCommandLine String
+           | BadCommandLine P.String
            | RanOutOfInput
              deriving (Eq, Ord, Show)
 
@@ -192,23 +199,23 @@ instance (HasEnv m, Monad m) => HasEnv (ExceptT e m) where
 -- be expanded.
 data Scan = Unmask String
           | Mask String
-          | Scan Token
-          | Rescan Token
+          | Scan (Token String)
+          | Rescan (Token String)
             deriving (Eq, Show)
 
 -- * Macros
 
 -- | There are object-like macros and function-like macros.
-data Macro = Object [Token]
+data Macro = Object [Token String]
            -- ^ An object-like macro is replaced with its definition
-           | Function Int ([([Scan],String)] -> [Scan])
+           | Function Int ([([Scan], String)] -> [Scan])
            -- ^ A function-like macro of some arity taks
            -- macro-expanded and raw versions of its arguments, then
            -- substitutes them into a body producing a new set of
            -- tokens.
 
 instance Show Macro where
-  show (Object ts) = "Object "++ detokenize ts
+  show (Object ts) = "Object "++ toChars (detokenize ts)
   show (Function n _) = "Fun<"++show n++">"
 
 -- | Looks up a 'Macro' in the current environment. If the 'Macro' is

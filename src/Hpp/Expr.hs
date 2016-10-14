@@ -126,7 +126,7 @@ precedenceBin Mod = 9
 -- * Lexing
 
 -- | String literals are split by tokenization. Fix them!
-fixStringLits :: [Token] -> Maybe [String]
+fixStringLits :: [Token String] -> Maybe [String]
 fixStringLits [] = Just []
 fixStringLits (Important h@('"':_):xs) =
   let (hs,ys) = break ((== '"') . last . detok) xs
@@ -138,9 +138,9 @@ fixStringLits (Important x:xs) = fmap (x :) (fixStringLits xs)
 fixStringLits (Other _ : xs) = fixStringLits xs
 
 onFirstImportant :: (String -> String)
-                 -> ([Token] -> [Token])
-                 -> [Token]
-                 -> [Token]
+                 -> ([Token String] -> [Token String])
+                 -> [Token String]
+                 -> [Token String]
 onFirstImportant f k = go
   where go [] = k []
         go (Important s : ts') = Important (f s) : k ts'
@@ -148,7 +148,7 @@ onFirstImportant f k = go
 
 -- | Re-combine positive and negative unary operators with the tokens
 -- to which they are attached.
-fixUnaryOps :: [Token] -> [Token]
+fixUnaryOps :: [Token String] -> [Token String]
 fixUnaryOps [] = []
 fixUnaryOps (t0:ts0) =
   case t0 of
@@ -164,7 +164,7 @@ fixUnaryOps (t0:ts0) =
         go _ (o@(Other _):ts) = o : go False ts
 
 -- | Re-combine multiple-character operators.
-fixBinaryOps :: [Token] -> [Token]
+fixBinaryOps :: [Token String] -> [Token String]
 fixBinaryOps [] = []
 fixBinaryOps (h@(Important t1) : ts@(Important t2 : ts')) =
   case parseBinOp (t1++t2) of
@@ -198,7 +198,7 @@ renderUnaryOp BitNot = "~"
 renderUnaryOp Not = "!"
 renderUnaryOp Defined = "defined "
 
-lexExpr :: [Token] -> Maybe [String]
+lexExpr :: [Token String] -> Maybe [String]
 lexExpr = fixStringLits . fixUnaryOps . fixBinaryOps
 
 -- * Parsing Tokens
@@ -367,7 +367,7 @@ rpnToExpr (s1:s2:ss) (PBinOp o : es) = rpnToExpr (EBinOp o s2 s1 : ss) es
 rpnToExpr _ _ = Nothing
 
 -- | Try to read an 'Expr' from a sequence of 'Token's.
-parseExpr :: [Token] -> Maybe Expr
+parseExpr :: [Token String] -> Maybe Expr
 parseExpr = lexExpr >=> shuntRPN [] [] >=> rpnToExpr []
 
 -- | Pretty-print an 'Expr' to something semantically equivalent to the original
@@ -378,7 +378,7 @@ renderExpr (ELit (LitUInt e)) = show e ++ "U"
 renderExpr (ELit (LitStr e)) = '"':e++"\""
 renderExpr (ELit (LitChar c)) = [c]
 renderExpr (ELit (LitID e)) = e
-renderExpr (EBinOp o e1 e2) = concat [ "(", renderExpr e1," ",renderBinOp o 
+renderExpr (EBinOp o e1 e2) = concat [ "(", renderExpr e1," ",renderBinOp o
                                      , " ", renderExpr e2, ")" ]
 renderExpr (EUnaryOp o e1) = renderUnaryOp o ++ renderExpr e1
 
@@ -423,6 +423,6 @@ evalExpr' = go
         go (EUnaryOp BitNot e2) = cppComplement $ go e2
         go (EUnaryOp Not e2) = int . fromEnum $ go e2 == 0
         go (EUnaryOp Defined e2) =
-          case e2 of 
+          case e2 of
             ELit (LitInt 1) -> 1
             _ -> 0

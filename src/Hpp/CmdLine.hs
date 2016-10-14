@@ -1,15 +1,17 @@
-{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE OverloadedStrings, RankNTypes #-}
 -- | A front-end to run Hpp with textual arguments as from a command
 -- line invocation.
 module Hpp.CmdLine (runWithArgs) where
 import Control.Monad (unless)
+import Data.String (fromString)
 import Hpp
 import Hpp.Config
 import Hpp.Env (deleteKey, emptyEnv, insertPair)
+import Hpp.StringSig (readLines, putStringy)
 import Hpp.Tokens
 import Hpp.Types (Env, Error(..))
 import System.Directory (doesFileExist, makeAbsolute)
-import System.IO (openFile, IOMode(..), hPutStr, hClose)
+import System.IO (openFile, IOMode(..), hClose, stdout)
 
 -- | Break a string on an equals sign. For example, the string @x=y@
 -- is broken into @[x,"=",y]@.
@@ -38,15 +40,15 @@ parseArgs cfg0 = go emptyEnv id cfg0 Nothing . concatMap breakEqs
             Just cfg' -> return (Right (env, acc [], cfg', out))
             Nothing -> return (Left NoInputFile)
         go env acc cfg out ("-D":name:"=":body:rst) =
-          case parseDefinition (Important name : Other " " : tokenize body) of
+          case parseDefinition (Important (fromString name) : Other " " : tokenize (fromString body)) of
             Nothing -> return . Left $ BadMacroDefinition 0
             Just def -> go (insertPair def env) acc cfg out rst
         go env acc cfg out ("-D":name:rst) =
-          case parseDefinition ([Important name, Other " ", Important "1"]) of
+          case parseDefinition ([Important (fromString name), Other " ", Important "1"]) of
             Nothing -> return . Left $ BadMacroDefinition 0
             Just def -> go (insertPair def env) acc cfg out rst
         go env acc cfg out ("-U":name:rst) =
-          go (deleteKey name env) acc cfg out rst
+          go (deleteKey (fromString name) env) acc cfg out rst
         go env acc cfg out ("-I":dir:rst) =
           let cfg' = cfg { includePathsF = fmap (++[dir]) (includePathsF cfg) }
           in go env acc cfg' out rst
@@ -99,14 +101,14 @@ runWithArgs args =
      let fileName = curFileName cfg
          cfg' = cfg { curFileNameF = pure fileName }
      (snk, closeSnk) <- case outPath of
-                          Nothing -> return (mapM_ putStr, return ())
+                          Nothing -> return (mapM_ (putStringy stdout) , return ())
                           Just f ->
                             do h <- makeAbsolute f >>=
                                     flip openFile WriteMode
-                               return (\os -> mapM_ (hPutStr h) os
+                               return (\os -> mapM_ (putStringy h) os
                                       ,hClose h)
-     _ <- (lines <$> readFile fileName)
-           >>= hppIO cfg' env snk . (lns ++)
+     _ <- (readLines fileName)
+           >>= hppIO cfg' env snk . (map fromString lns ++)
      -- lns' <- (lines <$> readFile fileName)
      --          >>= hppFileContents cfg env fileName . (lns ++)
      -- snk lns'

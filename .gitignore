@@ -16,3 +16,7 @@ tests/mcpp-2.7.2
 /hpp.pdf
 /bench.prof
 /hpp.ps
+/.stack-work
+/Setup
+*.hi
+*.o
