@@ -1,5 +1,21 @@
+{-# LANGUAGE TupleSections #-}
 -- | A name binding context, or environment.
 module Hpp.Env where
+import qualified Data.ByteString.Lazy as L
+import qualified Data.Trie as T
+
+emptyEnv :: T.Trie a
+emptyEnv = T.empty
+
+insertPair :: (L.ByteString, a) -> T.Trie a -> T.Trie a
+insertPair (k,v) = T.insert (L.toStrict k) v
+
+deleteKey :: L.ByteString -> T.Trie a -> T.Trie a
+deleteKey k = T.delete (L.toStrict k)
+
+lookupKey :: L.ByteString -> T.Trie a -> Maybe (a, T.Trie a)
+lookupKey k t = (,t) <$> T.lookup (L.toStrict k) t
+
 
 {-
 import qualified Data.Map as M
@@ -20,7 +36,7 @@ lookupKey :: String -> M.Map String a -> Maybe (a, M.Map String a)
 lookupKey k m = fmap (\x -> (x, m)) (M.lookup k m)
 {-# INLINE lookupKey #-}
 -}
-
+{-
 -- | An empty binding environment.
 emptyEnv :: [a]
 emptyEnv = []
@@ -48,3 +64,4 @@ lookupKey k = go id
           | k == x = Just (v, h : acc [] ++ xs)
           | otherwise = go (acc . (h:)) xs
 {-# INLINE lookupKey #-}
+-}

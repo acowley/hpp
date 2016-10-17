@@ -10,6 +10,7 @@ import Data.ByteString.Lazy.Char8 (ByteString)
 import Data.Functor.Constant
 import Data.Functor.Identity
 -- import qualified Data.Map as M
+import qualified Data.Trie as T
 import Hpp.Config
 import Hpp.Env (emptyEnv, lookupKey)
 import Hpp.StringSig (toChars)
@@ -19,9 +20,11 @@ import qualified Prelude as P
 
 -- | Line numbers are represented as 'Int's
 type LineNum = Int
+
 -- | A macro binding environment.
-type Env = [(String, Macro)]
+-- type Env = [(String, Macro)]
 -- type Env = M.Map String Macro
+type Env = T.Trie Macro
 
 -- * Changing the underlying string type
 type String = ByteString
@@ -51,6 +54,7 @@ class HasError m where
 
 instance Monad m => HasError (ExceptT Error m) where
   throwError = throwE
+  {-# INLINE throwError #-}
 
 instance (Monad m, HasHppState m) => HasHppState (ExceptT e m) where
   getState = lift getState

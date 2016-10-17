@@ -160,24 +160,24 @@ functionMacro params body = paste
         subst toks gamma = go toks
           where go [] = []
                 go (p@(Important "##"):t@(Important s):ts) =
-                  case lookupKey s gamma of
+                  case lookup s gamma of
                     Nothing -> Rescan p : Rescan t : go ts
-                    Just ((_,arg),_) ->
+                    Just (_,arg) ->
                       Rescan p : Rescan (Important arg) : go ts
                 go (t@(Important s):p@(Important "##"):ts) =
-                  case lookupKey s gamma of
+                  case lookup s gamma of
                     Nothing -> Rescan t : go (p:ts)
-                    Just ((_,arg),_) -> Rescan (Important arg) : go (p:ts)
+                    Just (_,arg) -> Rescan (Important arg) : go (p:ts)
                 go (t@(Important "##"):ts) = Rescan t : go ts
                 go (t@(Important ('#':.s)) : ts) =
-                  case lookupKey s gamma of
+                  case lookup s gamma of
                     Nothing -> Rescan t : go ts
-                    Just ((_,arg),_) ->
+                    Just (_,arg) ->
                       Rescan (Important (stringify arg)) : go ts
                 go (t@(Important s) : ts) =
-                  case lookupKey s gamma of
+                  case lookup s gamma of
                     Nothing -> Rescan t : go ts
-                    Just ((arg,_),_) -> arg ++ go ts
+                    Just (arg,_) -> arg ++ go ts
                 go (t:ts) = Rescan t : go ts
         prepStringify [] = []
         prepStringify (Important "#" : ts) =
