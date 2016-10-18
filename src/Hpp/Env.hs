@@ -1,20 +1,22 @@
 {-# LANGUAGE TupleSections #-}
 -- | A name binding context, or environment.
 module Hpp.Env where
-import qualified Data.ByteString.Lazy as L
+import Data.ByteString (ByteString)
 import qualified Data.Trie as T
 
 emptyEnv :: T.Trie a
 emptyEnv = T.empty
 
-insertPair :: (L.ByteString, a) -> T.Trie a -> T.Trie a
-insertPair (k,v) = T.insert (L.toStrict k) v
+insertPair :: (ByteString, a) -> T.Trie a -> T.Trie a
+insertPair = uncurry T.insert
 
-deleteKey :: L.ByteString -> T.Trie a -> T.Trie a
-deleteKey k = T.delete (L.toStrict k)
+deleteKey :: ByteString -> T.Trie a -> T.Trie a
+deleteKey = T.delete
 
-lookupKey :: L.ByteString -> T.Trie a -> Maybe (a, T.Trie a)
-lookupKey k t = (,t) <$> T.lookup (L.toStrict k) t
+-- lookupKey :: L.ByteString -> T.Trie a -> Maybe (a, T.Trie a)
+-- lookupKey k t = (,t) <$> T.lookup (L.toStrict k) t
+lookupKey :: ByteString -> T.Trie a -> Maybe a
+lookupKey = T.lookup
 
 
 {-

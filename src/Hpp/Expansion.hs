@@ -12,13 +12,13 @@ import Data.Monoid ((<>))
 import Data.String (fromString)
 import Hpp.Config (Config, curFileName,
                    getDateString, getTimeString, prepDate, prepTime)
-import Hpp.Env (lookupKey, deleteKey)
+import Hpp.Env (deleteKey)
 import Hpp.Parser (Parser, ParserT, precede, replace, await, onIsomorphism,
                    onElements, droppingWhile, awaitJust, evalParse)
 import Hpp.StringSig (stringify, uncons, isEmpty, toChars)
 import Hpp.Tokens (Token(..), notImportant, isImportant, detokenize)
 import Hpp.Types (HasError(..), HasEnv(..), Scan(..), Error(..), Macro(..),
-                  TOKEN, String)
+                  TOKEN, String, lookupMacro)
 import Prelude hiding (String)
 
 -- | Extract the 'TOKEN' payload from a 'Scan'.
@@ -141,10 +141,10 @@ expandFunction name arity f mkErr expand =
               let raw = map (detokenize . mapMaybe unscan) args
               return . Just $ Mask name : f (zip args' raw) ++ [Unmask name]
 
-lookupEnv :: (Monad m, HasEnv m)
-          => String -> ParserT m src Scan (Maybe Macro)
-lookupEnv s = lift $ getEnv >>= traverse aux . lookupKey s
-  where aux (m, env') = setEnv env' >> return m
+-- lookupEnv :: (Monad m, HasEnv m)
+--           => String -> ParserT m src Scan (Maybe Macro)
+-- lookupEnv s = lift $ getEnv >>= traverse aux . lookupKey s
+--   where aux (m, env') = setEnv env' >> return m
 
 expandMacro :: (Monad m, HasError m, HasEnv m)
             => Config -> Int -> String -> Scan -> ParserT m src Scan [Scan]
@@ -154,7 +154,7 @@ expandMacro cfg lineNum name tok =
     "__FILE__" -> simple . stringify . fromString $ curFileName cfg
     "__DATE__" -> simple . stringify . fromString . getDateString $ prepDate cfg
     "__TIME__" -> simple . stringify . fromString . getTimeString $ prepTime cfg
-    _ -> do mm <- lookupEnv name
+    _ -> do mm <- lift (lookupMacro name)
             case mm of
               Nothing -> return [tok]
               Just m ->

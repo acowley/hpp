@@ -6,7 +6,7 @@ import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Trans.Class (MonadTrans, lift)
 import Control.Monad.Trans.Except (ExceptT, throwE)
 import Control.Monad.Trans.State.Strict (StateT, get, put)
-import Data.ByteString.Lazy.Char8 (ByteString)
+import Data.ByteString.Char8 (ByteString)
 import Data.Functor.Constant
 import Data.Functor.Identity
 -- import qualified Data.Map as M
@@ -126,7 +126,6 @@ instance Monad m => Monad (HppT t m) where
   HppT ma >>= fb = HppT $ ma >>= \case
                      PureF x -> runHppT $ fb x
                      FreeF x -> return . FreeF $ fmap (>>= fb) x
-  {-# INLINE (>>=) #-}
 
 instance MonadTrans (HppT t) where
   lift = HppT . fmap PureF
@@ -225,11 +224,8 @@ instance Show Macro where
 -- | Looks up a 'Macro' in the current environment. If the 'Macro' is
 -- found, the environment is juggled so that subsequent lookups of the
 -- same 'Macro' may evaluate more quickly.
-lookupMacro :: (HasHppState m, Monad m) => String -> m (Maybe Macro)
-lookupMacro s = do e <- use env
-                   case lookupKey s e of
-                     Nothing -> return Nothing
-                     Just (m,e') -> Just m <$ (env .= e')
+lookupMacro :: (HasEnv m, Monad m) => String -> m (Maybe Macro)
+lookupMacro s = lookupKey s <$> getEnv
 {-# INLINE lookupMacro #-}
 
 -- * Nano-lens

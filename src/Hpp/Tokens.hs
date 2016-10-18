@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings, ViewPatterns #-}
+{-# LANGUAGE BangPatterns, OverloadedStrings, ViewPatterns #-}
 -- | Tokenization breaks a 'String' into pieces of whitespace,
 -- constants, symbols, and identifiers.
 module Hpp.Tokens (Token(..), detok, isImportant, notImportant, importants,
@@ -122,6 +122,8 @@ tokWords s =
               | c == '\'' = Just TokQuote
               | c == '"' = Just TokDQuote
               | otherwise = Nothing
+        {-# INLINE aux #-}
+{-# INLINABLE tokWords #-}
 
 data LitStringChar = DBackSlash | EscapedDQuote | DQuote
 skipLiteral :: Stringy s => s -> (s,s)
@@ -140,7 +142,9 @@ splits :: Stringy s => (Char -> Bool) -> s -> [s]
 splits isDelim = filter (not . isEmpty) . go . sdropWhile isSpace
   where go s = case sbreak (\c -> if isDelim c then Just c else Nothing) s of
                   Nothing -> [s]
-                  Just (d, pre, pos) -> pre : fromString [d] : go (sdropWhile isSpace pos)
+                  Just (d, pre, pos) ->
+                    pre : fromString [d] : go (sdropWhile isSpace pos)
+{-# INLINE splits #-}
 
 -- | Predicate on space characters based on something approximating
 -- valid identifier syntax. This is used to break apart non-space
@@ -154,12 +158,14 @@ fixExponents :: Stringy s => [Token s] -> [Token s]
 fixExponents [] = []
 fixExponents (t1'@(Important t1) : ts@(Important t2 : Important t3 : ts')) =
   case (,,,) <$> uncons t1 <*> unsnoc t1 <*> uncons t2 <*> uncons t3 of
-    Just ((d1,_), (_,e), (c,cs), (d2,_))
+    Just !(!(!d1,_), !(_,!e), !(!c,!cs), !(!d2,_))
       | elem c ("-+" :: [Char]) &&
         isEmpty cs && isDigit d1 && isAlphaNum d2 &&
-        elem e ("eE" :: [Char]) -> Important (t1 <> t2 <> t3) : fixExponents ts'
+        elem e ("eE" :: [Char]) -> let t = t1 <> t2 <> t3
+                                   in t `seq` Important t : fixExponents ts'
     _ -> t1' : fixExponents ts
 fixExponents (t:ts) = t : fixExponents ts
+{-# INLINABLE fixExponents #-}
 
 -- | Break an input 'String' into a sequence of 'Tokens'. Warning:
 -- This may not exactly correspond to your target language's
@@ -174,6 +180,7 @@ tokenize = fixExponents . foldMap seps . tokWords
               | c == '"' -> [t]
               | c == '\'' -> [t]
               | otherwise -> map Important (splits (not . validIdentifierChar) s)
+{-# INLINABLE tokenize #-}
 
 -- | Collapse a sequence of 'Tokens' back into a 'String'. @detokenize
 -- . tokenize == id@.

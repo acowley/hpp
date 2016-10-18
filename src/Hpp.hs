@@ -76,33 +76,31 @@ lineSplicing = go id
 
 -- * C Comments
 
-data BCSChar = StartDQuote | StartFSlash
 breakBlockCommentStart :: Stringy s => s -> Maybe (s, s)
 breakBlockCommentStart s =
-  case breakOn [("\"", StartDQuote), ("/*", StartFSlash)] s of
-    Nothing -> Nothing
-    Just (StartDQuote, pre, pos) -> let (lit, rest) = skipLiteral pos
-                                    in first ((pre <> lit) <>) <$>
-                                       breakBlockCommentStart rest
-    Just (StartFSlash, pre, pos) -> Just (pre, pos)
+  case breakCharOrSub '"' "/*" s of
+    NoMatch -> Nothing
+    CharMatch pre pos -> let (lit, rest) = skipLiteral pos
+                         in first ((pre <> lit) <>) <$>
+                            breakBlockCommentStart rest
+    SubMatch pre pos -> Just (pre, pos)
 
-data BCEChar = EndDQuote | EndAsterisk
 breakBlockCommentEnd :: Stringy s => s -> Maybe s
 breakBlockCommentEnd s =
-  case breakOn [("\"", EndDQuote), ("*/", EndAsterisk)] s of
-    Nothing -> Nothing
-    Just (EndDQuote, _, pos) -> let (_, rest) = skipLiteral pos
-                                in breakBlockCommentEnd rest
-    Just (EndAsterisk, _, pos) -> Just pos
+  case breakCharOrSub '"' "*/" s of
+    NoMatch -> Nothing
+    CharMatch _ pos -> let (_, rest) = skipLiteral pos
+                       in breakBlockCommentEnd rest
+    SubMatch _ pos -> Just pos
 
 dropOneLineBlockComments :: Stringy s => s -> s
 dropOneLineBlockComments s =
-  case breakOn [("\"", StartDQuote), ("/*", StartFSlash)] s of
-    Nothing -> s
-    Just (StartDQuote, pre, pos) ->
+  case breakCharOrSub '"' "/*"s of
+    NoMatch -> s
+    CharMatch pre pos ->
       let (lit,rest) = skipLiteral pos
       in snoc pre '"' <> lit <> dropOneLineBlockComments rest
-    Just (StartFSlash, pre, pos) ->
+    SubMatch pre pos ->
       case breakOn [("*/", ())] pos of
         Nothing -> pre <> "/*"
         Just (_,_,pos') -> snoc pre ' ' <> dropOneLineBlockComments pos'
@@ -415,9 +413,12 @@ directive = lift (onElements (awaitJust "directive")) >>= aux
           do fileName <- lift (toChars . detokenize . trimUnimportant . init
                                <$> expandLineP)
              ln <- use lineNum
-             src <- readFun ln fileName
+             src <- prepareInput <*> readFun ln fileName
              lineNum .= ln+1
-             fmap ($src) prepareInput >>= lift . streamNewFile (unquote fileName)
+             lift (streamNewFile (unquote fileName) src)
+        {- SPECIALIZE includeAux ::
+            (LineNum -> FilePath -> HppT [String] (Parser (StateT HppState (ExceptT Error IO)) [TOKEN]) [String])
+            -> HppT [String] (Parser (StateT HppState (ExceptT Error IO)) [TOKEN]) () #-}
         ifAux =
           do toks <- lift (onElements droppingSpaces >> takeLine)
              e <- use env
@@ -429,6 +430,9 @@ directive = lift (onElements (awaitJust "directive")) >>= aux
              if maybe False (/= 0) res
                then lift (takeBranch ln >>= precede)
                else lift (dropBranchLine ln >>= replace . fst)
+
+{-# SPECIALIZE directive ::
+    HppT [String] (Parser (StateT HppState (ExceptT Error IO)) [TOKEN]) Bool #-}
 
 -- | We want to expand macros in expressions that must be evaluated
 -- for conditionals, but we want to take special care when dealing
@@ -442,7 +446,8 @@ squashDefines env' (Important "defined" : ts) = go ts
         go (Important t : ts') =
           case lookupKey t env' of
             Nothing -> Important "0" : squashDefines env' ts'
-            Just (_,env'') -> Important "1" : squashDefines env'' ts'
+            -- Just (_,env'') -> Important "1" : squashDefines env'' ts'
+            Just _ -> Important "1" : squashDefines env' ts'
         go [] = []
 squashDefines env' (t : ts) = t : squashDefines env' ts
 
@@ -560,12 +565,14 @@ normalCPP = map ((++ [Other "\n"]) . tokenize)
           -- . map dropLineComments
           . removeMultilineComments 1
           . map (dropOneLineBlockComments . trigraphReplacement)
+{-# INLINABLE normalCPP #-}
 
 -- | For Haskell we do not want trigraph replacement.
 haskellCPP :: [String] -> [[TOKEN]]
 haskellCPP = map ((++[Other "\n"]) . tokenize)
            . lineSplicing
            . commentRemoval
+{-# INLINABLE haskellCPP #-}
 
 -- | If we don't have a predefined processor, we build one based on a
 -- 'Config' value.

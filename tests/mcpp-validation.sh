@@ -32,8 +32,11 @@ if ! [ -f tool/cpp_test ]; then
 fi
 
 echo 'Building hpp'
-# (cd .. && stack build hpp:hpp)
-(cd .. && cabal build)
+if [ -z "$TRAVIS" ]; then
+  (cd .. && stack build hpp:hpp)
+else
+  (cd .. && cabal build)
+fi
 if ! [ $? -eq 0 ]; then
   echo 'Building hpp failed'
   exit 1
@@ -49,8 +52,11 @@ echo 'Running the validation suite'
 # Note that we define __i386__ as the architecture as the MCPP
 # validation test n_12.c assumes a long is 32 bits.
 
-# (cd mcpp-2.7.2/test-c &&  ../tool/cpp_test HPP "$(cd ../../.. && stack exec which -- hpp) -I/usr/include ${GCCDIR} --cpp -D__i386__ -D__DARWIN_ONLY_UNIX_CONFORMANCE %s.c | gcc -o %s -w -x c -" "rm %s" < n_i_.lst)
-(cd mcpp-2.7.2/test-c &&  ../tool/cpp_test HPP "$(find ../../../dist -type f -executable -name hpp) -I/usr/include ${GCCDIR} --cpp -D__i386__ -D__DARWIN_ONLY_UNIX_CONFORMANCE %s.c | gcc -o %s -w -x c -" "rm %s" < n_i_.lst)
+if [ -z "$TRAVIS" ]; then
+  (cd mcpp-2.7.2/test-c &&  ../tool/cpp_test HPP "$(cd ../../.. && stack exec which -- hpp) -I/usr/include ${GCCDIR} --cpp -D__i386__ -D__DARWIN_ONLY_UNIX_CONFORMANCE %s.c | gcc -o %s -w -x c -" "rm %s" < n_i_.lst)
+else
+  (cd mcpp-2.7.2/test-c &&  ../tool/cpp_test HPP "$(find ../../../dist -type f -executable -name hpp) -I/usr/include ${GCCDIR} --cpp -D__i386__ -D__DARWIN_ONLY_UNIX_CONFORMANCE %s.c | gcc -o %s -w -x c -" "rm %s" < n_i_.lst)
+fi
 
 if ! [ $? -eq 0 ]; then
   echo 'The test runner exited with an error.'

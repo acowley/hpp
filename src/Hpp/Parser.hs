@@ -37,7 +37,6 @@ unconsMNonEmpty r = unconsM r >>= \case
   Just ([], rst) -> unconsMNonEmpty rst
   Just (x:xs, rst) -> return (Just (x :| xs, rst))
 
-
 unconsSpring :: Monad m => Headspring m (RopeM m [i]) i
 unconsSpring = Headspring aw ropePrecede
   where aw r = unconsMNonEmpty r >>= \case
@@ -66,7 +65,7 @@ await = do (hs, st) <- get
            lift (hsAwait hs st) >>= \case
              Nothing -> return Nothing
              Just (x,st') -> Just x <$ put (hs,st')
-{-# INLINABLE await #-}
+{-# INLINE await #-}
 
 -- | Push a value back into a parser's source.
 replace :: (Monad m) => i -> ParserT m src i ()
@@ -81,6 +80,7 @@ ropePrecede xs (Right ys : ms) = Right (xs++ys) : ms
 precede :: Monad m => [i] -> ParserT m src i ()
 precede xs = do (hs,st) <- get
                 put (hs, hsPrecede hs xs st)
+{-# INLINE precede #-}
 
 -- | Run a 'Parser' with a given input stream.
 parse :: Monad m => Parser m i o -> [i] -> m (o, RopeM m [i])
@@ -101,6 +101,7 @@ evalParse m xs = evalStateT m (unconsSpring, [Right xs])
 awaitJust :: (Monad m, HasError m) => String -> ParserT m src i i
 awaitJust s = await >>= maybe (lift $ throwError err) return
   where err = UserError 0 ("awaitJust: " ++ s)
+{-# INLINE awaitJust #-}
 
 -- | Discard all values until one fails to satisfy a predicate. At
 -- that point, the failing value is 'replace'd, and the
@@ -127,7 +128,6 @@ takingWhile p = go id
 insertInputSegment :: Monad m => src -> m () -> ParserT m (RopeM m src) i ()
 insertInputSegment xs k = modify' (second ([Right xs, Left k]++))
 
-
 -- * Parser Transformations
 
 onChunks :: Monad m => ParserT m (RopeM m [i]) [i] r -> Parser m i r
@@ -141,6 +141,7 @@ onElements m = do (hs,st) <- get
                   let onHead _ [] = []
                       onHead f (x:xs) = f x : xs
                   r <$ put (hs, onHead (fmap (dropWhile null)) st')
+{-# INLINE onElements #-}
 
 onIsomorphism :: forall m a b src r. Monad m
               => (a -> b) -> (b -> Maybe a)
@@ -155,3 +156,4 @@ onIsomorphism fwd bwd m =
          mappedSpring = Headspring aw pr
      (r, (_, (bs, st'))) <- lift (runStateT m (mappedSpring, ([], st)))
      r <$ put (hs, hsPrecede hs (mapMaybe bwd bs) st')
+{-# INLINE onIsomorphism #-}
