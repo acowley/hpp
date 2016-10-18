@@ -22,7 +22,7 @@ import Hpp.Expansion (expandLine)
 import Hpp.Expr (evalExpr, parseExpr)
 import Hpp.Parser (Parser, ParserT, replace, await, awaitJust, droppingWhile,
                    precede, takingWhile, insertInputSegment, onElements,
-                   evalParse)
+                   evalParse, onInputSegment)
 import Hpp.StringSig
 import Hpp.Tokens (Token(..), importants, isImportant, newLine, trimUnimportant,
                    detokenize, notImportant, tokenize, skipLiteral)
@@ -377,7 +377,7 @@ directive = lift (onElements (awaitJust "directive")) >>= aux
                      Nothing ->
                        lift (dropBranchLine ln >>= replace . fst)
                      Just _ ->
-                       lift (takeBranch ln >>= precede)
+                       lift (onInputSegment (takeBranchFun ln)) -- (takeBranch ln >>= precede)
                  _ -> throwError . UnknownCommand ln $
                       "ifdef "++ toChars (detokenize toks)
                return True
@@ -387,7 +387,7 @@ directive = lift (onElements (awaitJust "directive")) >>= aux
                case takeWhile isImportant toks of
                  [Important t] ->
                    lookupMacro t >>= \case
-                      Nothing -> lift (takeBranch ln >>= precede)
+                      Nothing -> lift (onInputSegment (takeBranchFun ln)) -- takeBranch ln >>= precede)
                       Just _ -> lift (dropBranchLine ln >>= replace . fst)
                  _ -> throwError . UnknownCommand ln $
                       "ifndef "++ toChars (detokenize toks)
@@ -428,7 +428,7 @@ directive = lift (onElements (awaitJust "directive")) >>= aux
              let res = evalExpr <$> parseExpr (map (fmap toChars) ex)
              lineNum .= ln
              if maybe False (/= 0) res
-               then lift (takeBranch ln >>= precede)
+               then lift (onInputSegment (takeBranchFun ln)) -- (takeBranch ln >>= precede)
                else lift (dropBranchLine ln >>= replace . fst)
 
 {-# SPECIALIZE directive ::
@@ -461,47 +461,42 @@ getCmd = aux . dropWhile notImportant
 droppingSpaces ::(Monad m) => ParserT m src TOKEN ()
 droppingSpaces = droppingWhile notImportant
 
--- | Take an entire conditional expression (e.g. @#if
--- ... #endif@). All the lines of the taken branch are returned, in
--- reverse order.
-takeConditional :: (HasError m, Monad m)
-                => LineNum
-                -> Parser m [TOKEN] ([[TOKEN]], LineNum)
-takeConditional !n0 = go (1::Int) id n0
-  where go 0 acc !n = return (acc [], n)
-        go nesting acc !n =
-          do ln <- awaitJust "takeConditional"
-             case getCmd ln of
-               Just cmd
-                 | cmd == "endif" ->
-                   go (nesting-1) (acc . (ln:)) (n+1)
-                 | cmd `elem` ["if","ifdef","ifndef"] ->
-                   go (nesting+1) (acc . (ln:)) (n+1)
-               _ -> go nesting (acc . (ln:)) (n+1)
+dropBranchFun :: [[TOKEN]] -> (Int, [[TOKEN]])
+dropBranchFun = go (1::Int) 0
+  where go _ !n [] = (n,[])
+        go !nesting !n (ln:lns) =
+          case getCmd ln of
+            Just cmd
+              | cmd == "endif" -> if nesting == 1
+                                  then (n, ln:lns)
+                                  else go (nesting-1) (n+1) lns
+              | cmd `elem` ["if","ifdef","ifndef"] ->
+                go (nesting+1) (n+1) lns
+              | cmd `elem` ["else","elif"] -> if nesting == 1
+                                              then (n, ln : lns)
+                                              else go nesting (n+1) lns
+            _ -> go nesting (n+1) lns
 
 -- | Take everything up to the end of this branch, drop all remaining
 -- branches (if any).
-takeBranch :: (HasError m, Monad m) => LineNum -> Parser m [TOKEN] [[TOKEN]]
-takeBranch = go id
-  where go acc !n = do ln <- awaitJust "takeBranch"
-                       case getCmd ln of
-                         Just cmd
-                           | cmd `elem` ["if","ifdef","ifndef"] ->
-                             do (lns, n') <- takeConditional (n+1)
-                                go (acc . ((ln:lns)++)) n'
-                           | cmd == "endif" -> return (acc [yieldLineNum n])
-                           | cmd `elem` ["else","elif"] ->
-                             do numSkipped <- dropAllBranches
-                                return (acc [yieldLineNum (n+1+numSkipped)])
-                         _ -> go (acc . (ln:)) (n+1)
+takeBranchFun :: LineNum -> [[TOKEN]] -> [[TOKEN]]
+takeBranchFun = go (1::Int)
+  where go _ _ [] = [] -- error: unterminated conditional
+        go 0 !n lns = yieldLineNum n : lns
+        go !nesting !n (ln:lns) =
+          case getCmd ln of
+            Just cmd
+              | cmd `elem` ["if","ifdef","ifndef"] ->
+                ln : go (nesting+1) (n+1) lns
+              | cmd == "endif" -> ln : go (nesting - 1) (n + 1) lns
+              | nesting == 1 && cmd `elem` ["else","elif"] ->
+                let (numSkipped, lns') = dropBranchFun lns
+                in go 1 (n+1+numSkipped) lns'
+            _ -> ln : go nesting (n+1) lns
+
 
 yieldLineNum :: LineNum -> [TOKEN]
 yieldLineNum !ln = [Important ("#line " <> fromString (show ln)), Other "\n"]
-
-dropAllBranches :: (HasError m, Monad m) => Parser m [TOKEN] Int
-dropAllBranches = dropBranch >>= uncurry (aux 0)
-  where aux !acc Nothing !numDropped = return (acc+numDropped)
-        aux !acc _ !numDropped = dropBranch >>= uncurry (aux (acc+numDropped))
 
 dropBranchLine :: (HasError m, Monad m)
                => LineNum -> Parser m [TOKEN] ([TOKEN], LineNum)

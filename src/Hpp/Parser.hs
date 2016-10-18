@@ -2,7 +2,8 @@
 -- | Parsers over streaming input.
 module Hpp.Parser (Parser, ParserT, parse, evalParse, await, awaitJust, replace,
                    droppingWhile, precede, takingWhile, onChunks, onElements,
-                   insertInputSegment, onIsomorphism, runParser) where
+                   onInputSegment, insertInputSegment, onIsomorphism,
+                   runParser) where
 import Control.Arrow (second, (***))
 import Control.Monad.Trans.State.Strict
 import Hpp.Types (HasError(..), Error(UserError))
@@ -127,6 +128,14 @@ takingWhile p = go id
 
 insertInputSegment :: Monad m => src -> m () -> ParserT m (RopeM m src) i ()
 insertInputSegment xs k = modify' (second ([Right xs, Left k]++))
+
+onInputSegment :: Monad m => (src -> src) -> ParserT m (RopeM m src) i ()
+onInputSegment f = do (hs,st) <- get
+                      case st of
+                        [] -> return ()
+                        (Right xs : ys) -> put (hs, Right (f xs) : ys)
+                        (Left m : xs) -> lift m >> put (hs,xs) >> onInputSegment f
+{-# INLINABLE onInputSegment #-}
 
 -- * Parser Transformations
 
