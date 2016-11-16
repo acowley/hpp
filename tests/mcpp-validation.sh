@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-HOST='http://tcpdiag.dl.sourceforge.net/project/mcpp/mcpp/V.2.7.2/'
+HOST='http://prdownloads.sourceforge.net/mcpp/mcpp-2.7.2.tar.gz?download'
 FILE='mcpp-2.7.2.tar.gz'
 GCC=gcc
 
@@ -18,7 +18,7 @@ fi
 
 if ! [ -d "mcpp-2.7.2" ]; then
   echo 'Downloading MCPP source'
-  curl "${HOST}${FILE}" > "${FILE}"
+  curl -L "${HOST}" > "${FILE}"
   tar xf ${FILE}
 fi
 
