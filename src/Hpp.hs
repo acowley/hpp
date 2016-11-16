@@ -592,8 +592,8 @@ prepareInput =
 
 -- | Run a stream of lines through the preprocessor.
 preprocess :: (Monad m, HppCaps m)
-           => ([String] -> src) -> [String] -> HppT [String] (Parser m [TOKEN]) ()
-preprocess _convertOutput src =
+           => [String] -> HppT [String] (Parser m [TOKEN]) ()
+preprocess src =
   do cfg <- getL config <$> getState
      prep <- prepareInput
      let prepOutput = if inhibitLinemarkers cfg then aux else pure
@@ -602,21 +602,35 @@ preprocess _convertOutput src =
   where aux xs | sIsPrefixOf "#line" xs = []
                | otherwise = [xs]
 
+-- Note: `preprocess` is the workhorse of the library. We run the
+-- value it returns in `hppIO'` by interleaving interpretation of
+-- `HppT` with binds of types providing the `HppCaps`
+-- capabilities. When making things concrete, we specialize to
+-- `ExceptT`, `StateT`, and `Parser` (note that `Parser` is actually
+-- just another `StateT`).
+
+-- | A concreate choice of types to satisfy `HppCaps` as required by
+-- `preprocess`.
+dischargeHppCaps :: Monad m
+                 => Config -> Env
+                 -> Parser (StateT HppState (ExceptT Error m))
+                           i
+                           (Either (a, Error) b)
+                 -> m (Maybe Error)
+dischargeHppCaps cfg env' m =
+  runExceptT
+    (evalStateT
+       (evalParse (m >>= either (throwError . snd) return) [])
+       initialState)
+  >>= return . either Just (const Nothing)
+  where initialState = setL env env' $ emptyHppState cfg
+
 -- | General hpp runner against input source file lines; can return an
 -- 'Error' value if something goes wrong.
 hppIO' :: Config -> Env -> ([String] -> IO ()) -> [String] -> IO (Maybe Error)
 hppIO' cfg env' snk src =
-  runExceptT'
-    (evalStateT
-       (evalParse
-          ((>>= either (throwError . snd) return)
-           (runHpp (liftIO . readLines)
-                   (liftIO . snk)
-                   (preprocess id src)))
-          [])
-       initialState) >>= return . either Just (const Nothing)
-  where initialState = setL env env' $ emptyHppState cfg
-        runExceptT' = runExceptT :: ExceptT Error m a -> m (Either Error a)
+  dischargeHppCaps cfg env' $
+  runHpp (liftIO . readLines) (liftIO . snk) (preprocess src)
 
 -- | General hpp runner against input source file lines. Any errors
 -- encountered are thrown with 'error'.
