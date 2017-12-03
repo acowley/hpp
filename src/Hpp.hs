@@ -240,35 +240,39 @@ searchForNextInclude paths = maybe (return Nothing) (aux False)
 
 -- * Running an Hpp Action
 
+data HppResult a = HppResult { hppFilesRead :: [FilePath]
+                             , _hppResult :: a }
+
 runHpp :: forall m a src. (MonadIO m, HasHppState m)
        => (FilePath -> m src)
        -> (src -> m ())
        -> HppT src m a
-       -> m (Either (FilePath,Error) a)
-runHpp source sink m = runHppT m >>= go
-  where go :: FreeF (HppF src) a (HppT src m a)
-           -> m (Either (FilePath, Error) a)
-        go (PureF x) = return $ Right x
-        go (FreeF s) = case s of
+       -> m (Either (FilePath,Error) (HppResult a))
+runHpp source sink m = runHppT m >>= go []
+  where go :: [FilePath]
+           -> FreeF (HppF src) a (HppT src m a)
+           -> m (Either (FilePath, Error) (HppResult a))
+        go files (PureF x) = return $ Right (HppResult files x)
+        go files (FreeF s) = case s of
           ReadFile ln file k ->
             (includePaths <$> use config)
             >>= liftIO . flip searchForInclude file
-            >>= readAux ln file k
+            >>= readAux (file:files) ln file k
           ReadNext ln file k ->
             (includePaths <$> use config)
             >>= liftIO . flip searchForNextInclude file
-            >>= readAux ln file k
-          WriteOutput output k -> sink output >> runHppT k >>= go
+            >>= readAux (file:files) ln file k
+          WriteOutput output k -> sink output >> runHppT k >>= go files
 
-        readAux ln file _ Nothing =
+        readAux _files ln file _ Nothing =
           Left . (, IncludeDoesNotExist ln file) . curFileName <$> use config
-        readAux _ln _file k (Just file') =
-          source file' >>= runHppT . k >>= go
+        readAux files _ln _file k (Just file') =
+          source file' >>= runHppT . k >>= go files
 {-# SPECIALIZE runHpp ::
     (FilePath -> Parser (StateT HppState (ExceptT Error IO)) [TOKEN] [String])
  -> ([String] -> Parser (StateT HppState (ExceptT Error IO)) [TOKEN] ())
  -> HppT [String] (Parser (StateT HppState (ExceptT Error IO)) [TOKEN]) a
- -> Parser (StateT HppState (ExceptT Error IO)) [TOKEN] (Either (FilePath,Error) a) #-}
+ -> Parser (StateT HppState (ExceptT Error IO)) [TOKEN] (Either (FilePath,Error) (HppResult a)) #-}
 
 -- * Preprocessor
 
@@ -616,32 +620,34 @@ dischargeHppCaps :: Monad m
                  -> Parser (StateT HppState (ExceptT Error m))
                            i
                            (Either (a, Error) b)
-                 -> m (Maybe Error)
+                 -> m (Either Error b)
 dischargeHppCaps cfg env' m =
   runExceptT
     (evalStateT
        (evalParse (m >>= either (throwError . snd) return) [])
        initialState)
-  >>= return . either Just (const Nothing)
   where initialState = setL env env' $ emptyHppState cfg
 
 -- | General hpp runner against input source file lines; can return an
 -- 'Error' value if something goes wrong.
-hppIO' :: Config -> Env -> ([String] -> IO ()) -> [String] -> IO (Maybe Error)
+hppIO' :: Config -> Env -> ([String] -> IO ()) -> [String]
+       -> IO (Either Error [FilePath])
 hppIO' cfg env' snk src =
-  dischargeHppCaps cfg env' $
+  fmap (fmap hppFilesRead)
+  . dischargeHppCaps cfg env' $
   runHpp (liftIO . readLines) (liftIO . snk) (preprocess src)
 
 -- | General hpp runner against input source file lines. Any errors
 -- encountered are thrown with 'error'.
-hppIO :: Config -> Env -> ([String] -> IO ()) -> [String] -> IO ()
-hppIO cfg env' snk = fmap (maybe () (error . show)) . hppIO' cfg env' snk
+hppIO :: Config -> Env -> ([String] -> IO ()) -> [String] -> IO [FilePath]
+hppIO cfg env' snk = fmap (either (error . show) id) . hppIO' cfg env' snk
 
 -- | hpp runner that returns output lines.
-hppFileContents :: Config -> Env ->  FilePath -> [String] -> IO (Either Error [String])
+hppFileContents :: Config -> Env ->  FilePath -> [String]
+                -> IO (Either Error ([FilePath], [String]))
 hppFileContents cfg env' fileName src = do
   r <- newIORef id
   let snk xs = modifyIORef r (. (xs++))
   hppIO' (cfg {curFileNameF = pure fileName}) env' snk src >>= \case
-    Nothing -> Right . ($ []) <$> readIORef r
-    Just e -> return (Left e)
+    Left e -> return (Left e)
+    Right files -> Right . (files,) . ($ []) <$> readIORef r
