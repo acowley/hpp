@@ -4,8 +4,6 @@ import Data.ByteString.Char8 (ByteString)
 import Data.Maybe (fromMaybe)
 import Data.Monoid ((<>))
 import Hpp
-import Hpp.Env (insertPair)
-import Hpp.Types (over, env)
 import System.Exit
 
 sourceIfdef :: [ByteString]
@@ -36,11 +34,10 @@ testElse :: IO Bool
 testElse = hppHelper emptyHppState sourceIfdef ["x = 99\n","\n"]
 
 testIf :: IO Bool
-testIf = hppHelper (over env (insertPair defn) emptyHppState)
+testIf = hppHelper (fromMaybe (error "Preprocessor definition did not parse")
+                              (addDefinition "FOO" "1" emptyHppState))
                    sourceIfdef
                    ["x = 42\n","\n"]
-  where defn = fromMaybe (error "Preprocessor definition did not parse")
-                         (parseDefinition "FOO 1")
 
 testArith1 :: IO Bool
 testArith1 = (&&) <$> hppHelper emptyHppState (sourceArith1 "7") ["yay\n","\n"]

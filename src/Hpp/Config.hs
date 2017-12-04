@@ -75,7 +75,9 @@ prepDate = runIdentity . prepDateF
 prepTime :: Config -> TimeString
 prepTime = runIdentity . prepTimeF
 
--- | A default configuration with no current file name set.
+-- | A default configuration with no current file name set. Note that
+-- long line splicing is enabled, C++-style comments are erased, #line
+-- markers are inhibited, and trigraph replacement is disabled.
 defaultConfigF :: ConfigF Maybe
 defaultConfigF = Config Nothing (Just [])
                         (Just True) (Just True) (Just True) (Just False)

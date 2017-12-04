@@ -4,7 +4,6 @@
 module Hpp.CmdLine (runWithArgs) where
 import Control.Monad (unless)
 import Control.Monad.Trans.Except (runExceptT)
-import Data.Monoid ((<>))
 import Data.String (fromString)
 import Hpp
 import Hpp.Config
@@ -41,11 +40,11 @@ parseArgs cfg0 = go emptyEnv id cfg0 Nothing . concatMap breakEqs
             Just cfg' -> return (Right (env, acc [], cfg', out))
             Nothing -> return (Left NoInputFile)
         go env acc cfg out ("-D":name:"=":body:rst) =
-          case parseDefinition (fromString name<>" "<>fromString body) of
+          case parseDefinition (fromString name) (fromString body) of
             Nothing -> return . Left $ BadMacroDefinition 0
             Just def -> go (insertPair def env) acc cfg out rst
         go env acc cfg out ("-D":name:rst) =
-          case parseDefinition (fromString name<>" 1") of
+          case parseDefinition (fromString name) "1" of
             Nothing -> return . Left $ BadMacroDefinition 0
             Just def -> go (insertPair def env) acc cfg out rst
         go env acc cfg out ("-U":name:rst) =
