@@ -73,7 +73,7 @@ streamHpp st snk (HppT h) =
 
 -- | An 'T.HppState' containing no macro definitions, and default
 -- values for the starting configuration: the name of the current file
--- is @"NoFile"@, there are no paths to be searched for included
+-- is @\"NoFile\"@, there are no paths to be searched for included
 -- files, etc. See 'C.Config' for more information on available
 -- configuration.
 emptyHppState :: T.HppState

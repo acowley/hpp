@@ -18,13 +18,32 @@ newtype DateString = DateString { getDateString :: String }
 -- Identity@. Specifically, the source file name of the file being
 -- processed /must/ be set.
 data ConfigF f = Config { curFileNameF        :: f FilePath
+                          -- ^ Name of the file being
+                          -- preprocessed. Hpp will update this as new
+                          -- files are included. The user must set it
+                          -- manually for the starting input file.
                         , includePathsF       :: f [FilePath]
+                        -- ^ Paths to be searched for included files.
                         , spliceLongLinesF    :: f Bool
+                        -- ^ A backslash as the last character of a
+                        -- line causes the next line to be appended to
+                        -- the current one eliding the newline
+                        -- character present in the source input.
                         , eraseCCommentsF     :: f Bool
+                        -- ^ Erase line comments (starting with @//@)
+                        -- and block comments (delimited by @/*@ and
+                        -- @*/@).
                         , inhibitLinemarkersF :: f Bool
+                        -- ^ Do not emit @#line@ directives.
                         , replaceTrigraphsF   :: f Bool
+                        -- ^ Replace trigraph sequences (each of which
+                        -- starts with two consecutive question marks
+                        -- (@\"??\"@) with the characters they encode.
                         , prepDateF           :: f DateString
-                        , prepTimeF           :: f TimeString }
+                        -- ^ Format string for @\_\_DATE\_\_@.
+                        , prepTimeF           :: f TimeString
+                        -- ^ Format string for @\_\_TIME\_\_@.
+                       }
 
 -- | A fully-populated configuration for the pre-processor.
 type Config = ConfigF Identity

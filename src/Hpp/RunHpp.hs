@@ -37,7 +37,7 @@ import qualified Prelude as P
 
 -- | The first component of each pair represents the end of a known
 -- trigraph sequence (each trigraph begins with two consecutive
--- question marks (@"??"@). The second component is the
+-- question marks (@\"??\"@). The second component is the
 -- single-character equivalent that we substitute in for the trigraph.
 trigraphs :: [(Char, Char)]
 trigraphs = [ ('=', '#')
