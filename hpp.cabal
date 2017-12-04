@@ -1,5 +1,5 @@
 name:                hpp
-version:             0.4.1
+version:             0.5.0
 synopsis:            A Haskell pre-processor
 description:         See the README for usage examples
 license:             BSD3
@@ -26,6 +26,7 @@ library
                        Hpp.Expansion,
                        Hpp.Expr,
                        Hpp.Parser,
+                       Hpp.RunHpp,
                        Hpp.String,
                        Hpp.StringSig,
                        Hpp.Tokens,
@@ -46,3 +47,9 @@ executable hpp
   hs-source-dirs:      .
   default-language:    Haskell2010
   ghc-options: -Wall
+
+test-suite aslib
+  type:       exitcode-stdio-1.0
+  main-is:    tests/AsLib.hs
+  build-depends: base, hpp, transformers, bytestring
+  default-language:    Haskell2010

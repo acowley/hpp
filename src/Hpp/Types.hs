@@ -22,8 +22,6 @@ import qualified Prelude as P
 type LineNum = Int
 
 -- | A macro binding environment.
--- type Env = [(String, Macro)]
--- type Env = M.Map String Macro
 type Env = T.Trie Macro
 
 -- * Changing the underlying string type

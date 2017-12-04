@@ -4,5 +4,5 @@ haskell.lib.buildStackProject {
   name = "hpp";
   buildInputs = [ ];
   #ghc = ghc;
-  ghc = haskell.compiler.ghc821;
+  ghc = haskell.compiler.ghc822;
 }

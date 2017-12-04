@@ -72,6 +72,7 @@ escapeChar = fmap fromString . flip lookup lut
                   , ('\'', 0x27), ('"', 0x22), ('?', 0x3F) ]
 
 data TokChar = TokSpace Char | TokQuote | TokDQuote
+
 -- | Break a 'String' into space and non-whitespace runs.
 tokWords :: Stringy s => s -> [Token s]
 tokWords s =

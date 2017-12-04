@@ -1,3 +1,7 @@
+# 0.5.0
+- Redesigned library API
+The `Hpp` module exports the main pieces. `Hpp.Env`, `Hpp.Types`, and `Hpp.Config` may be used for configuring the preprocessor.
+
 # 0.4.0
 
 - Simplify the parsing machinery

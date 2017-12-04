@@ -3,12 +3,13 @@
 -- line invocation.
 module Hpp.CmdLine (runWithArgs) where
 import Control.Monad (unless)
+import Control.Monad.Trans.Except (runExceptT)
+import Data.Monoid ((<>))
 import Data.String (fromString)
 import Hpp
 import Hpp.Config
 import Hpp.Env (deleteKey, emptyEnv, insertPair)
 import Hpp.StringSig (readLines, putStringy)
-import Hpp.Tokens
 import Hpp.Types (Env, Error(..))
 import System.Directory (doesFileExist, makeAbsolute)
 import System.IO (openFile, IOMode(..), hClose, stdout)
@@ -40,11 +41,11 @@ parseArgs cfg0 = go emptyEnv id cfg0 Nothing . concatMap breakEqs
             Just cfg' -> return (Right (env, acc [], cfg', out))
             Nothing -> return (Left NoInputFile)
         go env acc cfg out ("-D":name:"=":body:rst) =
-          case parseDefinition (Important (fromString name) : Other " " : tokenize (fromString body)) of
+          case parseDefinition (fromString name<>" "<>fromString body) of
             Nothing -> return . Left $ BadMacroDefinition 0
             Just def -> go (insertPair def env) acc cfg out rst
         go env acc cfg out ("-D":name:rst) =
-          case parseDefinition ([Important (fromString name), Other " ", Important "1"]) of
+          case parseDefinition (fromString name<>" 1") of
             Nothing -> return . Left $ BadMacroDefinition 0
             Just def -> go (insertPair def env) acc cfg out rst
         go env acc cfg out ("-U":name:rst) =
@@ -105,11 +106,18 @@ runWithArgs args =
                           Just f ->
                             do h <- makeAbsolute f >>=
                                     flip openFile WriteMode
-                               return (\os -> mapM_ (putStringy h) os
-                                      ,hClose h)
-     _ <- (readLines fileName)
-           >>= hppIO cfg' env snk . (map fromString lns ++)
-     -- lns' <- (lines <$> readFile fileName)
-     --          >>= hppFileContents cfg env fileName . (lns ++)
-     -- snk lns'
+                               return ( \os -> mapM_ (putStringy h) os
+                                      , hClose h )
+     let errorExcept = fmap (either (error . show) id) . runExceptT
+     _ <- readLines fileName
+           >>= errorExcept
+               . streamHpp (initHppState cfg' env) snk
+               . preprocess
+               . (map fromString lns ++)
+     -- (lns', _) <- readLines fileName
+     --              >>= errorExcept
+     --                  . runHpp (initHppState cfg' env)
+     --                  . preprocess
+     --                  . (map fromString lns ++)
+     -- snk (hppOutput lns')
      closeSnk
