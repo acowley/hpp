@@ -4,7 +4,8 @@
 module Hpp.RunHpp (parseDefinition, preprocess, runHpp,
                    hppIOSink, HppCaps, hppIO, HppResult(..)) where
 import Control.Arrow (first)
-import Control.Monad (unless)
+import Control.Exception (throwIO)
+import Control.Monad (unless, (>=>))
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Except
 import Control.Monad.IO.Class (MonadIO, liftIO)
@@ -645,8 +646,7 @@ hppIOSink' cfg env' snk src =
 -- are fed to the caller-supplied sink function. Any errors
 -- encountered are thrown with 'error'.
 hppIOSink :: Config -> Env -> ([String] -> IO ()) -> [String] -> IO [FilePath]
-hppIOSink cfg env' snk = fmap (either (error . show) id)
-                       . hppIOSink' cfg env' snk
+hppIOSink cfg env' snk = hppIOSink' cfg env' snk >=> either throwIO return
 
 -- | hpp runner that returns output lines.
 hppIO :: Config -> Env ->  FilePath -> [String]

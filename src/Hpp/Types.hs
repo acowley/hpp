@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleInstances, LambdaCase, Rank2Types #-}
 -- | The core types involved used by the pre-processor.
 module Hpp.Types where
+import Control.Exception (Exception (..))
 import Control.Monad (ap)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Trans.Class (MonadTrans, lift)
@@ -45,6 +46,8 @@ data Error = UnterminatedBranch
            | BadCommandLine P.String
            | RanOutOfInput
              deriving (Eq, Ord, Show)
+
+instance Exception Error
 
 -- | Hpp can raise various parsing errors.
 class HasError m where
