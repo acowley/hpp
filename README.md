@@ -34,7 +34,7 @@ Note that you will need to ensure that the `hpp` executable is available in your
 
 # The `hpp` Library
 
-The `hpp` executable is a command-line interface to the `hpp` library. While the `hpp` package has been designed to have minimal dependencies beyond what the `GHC` compiler itself uses, it does include a few small, framework-free unit tests that demonstrate basic usage as a library. In the `testIf` example, we preprocess the `sourceIfDef` input with a starting definition equivalent to `#define FOO 1`. In `testArith1`, we exercise basic integer arithmetic and comparison. The `hppHelper` function shows how to run your source input through the preprocessor: `runHpp initialState (preproces mySource)`.
+The `hpp` executable is a command-line interface to the `hpp` library. While the `hpp` package has been designed to have minimal dependencies beyond what the `GHC` compiler itself uses, it does include a few small, framework-free unit tests that demonstrate basic usage as a library. In the `testIf` example, we preprocess the `sourceIfdef` input with a starting definition equivalent to `#define FOO 1`. In `testArith1`, we exercise basic integer arithmetic and comparison. The `hppHelper` function shows how to run your source input through the preprocessor: `runHpp initialState (preproces mySource)`.
 
 ```haskell
 {-# LANGUAGE LambdaCase, OverloadedStrings #-}
