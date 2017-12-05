@@ -1,4 +1,4 @@
-{-# LANGUAGE LambdaCase, OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings #-}
 import Control.Monad.Trans.Except
 import Data.ByteString.Char8 (ByteString)
 import Data.Maybe (fromMaybe)
@@ -22,13 +22,14 @@ sourceArith1 s = [ "#define x 3"
                  , "#endif" ]
 
 hppHelper :: HppState -> [ByteString] -> [ByteString] -> IO Bool
-hppHelper st src expected = runExceptT (runHpp st (preprocess src)) >>= \case
-  Left e -> putStrLn ("Error running hpp: " ++ show e) >> return False
-  Right (res, _) -> if hppOutput res == expected
-                       then return True
-                       else do putStr ("Expected "++show expected++", got")
-                               print (hppOutput res)
-                               return False
+hppHelper st src expected =
+  case runExcept (expand st (preprocess src)) of
+    Left e -> putStrLn ("Error running hpp: " ++ show e) >> return False
+    Right (res, _) -> if hppOutput res == expected
+                      then return True
+                      else do putStr ("Expected "++show expected++", got")
+                              print (hppOutput res)
+                              return False
 
 testElse :: IO Bool
 testElse = hppHelper emptyHppState sourceIfdef ["x = 99\n","\n"]

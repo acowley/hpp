@@ -1,7 +1,7 @@
 {-# LANGUAGE BangPatterns, ConstraintKinds, LambdaCase, OverloadedStrings,
              ScopedTypeVariables, TupleSections, ViewPatterns #-}
 -- | Mid-level interface to the pre-processor.
-module Hpp.RunHpp (parseDefinition, preprocess, runHpp,
+module Hpp.RunHpp (parseDefinition, preprocess, runHpp, expandHpp,
                    hppIOSink, HppCaps, hppIO, HppResult(..)) where
 import Control.Arrow (first)
 import Control.Exception (throwIO)
@@ -9,7 +9,7 @@ import Control.Monad (unless, (>=>))
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Except
 import Control.Monad.IO.Class (MonadIO, liftIO)
-import Control.Monad.Trans.State.Strict (StateT, evalStateT)
+import Control.Monad.Trans.State.Strict (StateT, evalStateT, State)
 import Data.Char (isSpace)
 import Data.IORef
 import Data.Maybe (fromMaybe)
@@ -244,6 +244,9 @@ searchForNextInclude paths = maybe (return Nothing) (aux False)
 data HppResult a = HppResult { hppFilesRead :: [FilePath]
                              , hppResult :: a }
 
+-- | Interpret the IO components of the preprocessor. This
+-- implementation relies on IO for the purpose of checking search
+-- paths for included files.
 runHpp :: forall m a src. (MonadIO m, HasHppState m)
        => (FilePath -> m src)
        -> (src -> m ())
@@ -274,6 +277,36 @@ runHpp source sink m = runHppT m >>= go []
  -> ([String] -> Parser (StateT HppState (ExceptT Error IO)) [TOKEN] ())
  -> HppT [String] (Parser (StateT HppState (ExceptT Error IO)) [TOKEN]) a
  -> Parser (StateT HppState (ExceptT Error IO)) [TOKEN] (Either (FilePath,Error) (HppResult a)) #-}
+
+-- | Like ’runHpp’, but any @#include@ directives are skipped. These
+-- ignored inclusions are tracked in the returned list of files, but
+-- note that since extra source files are not opened, any files they
+-- might wish to include are not discovered.
+expandHpp :: forall m a src. (Monad m, HasHppState m, Monoid src)
+          => (src -> m ())
+          -> HppT src m a
+          -> m (Either (FilePath,Error) (HppResult a))
+expandHpp sink m = runHppT m >>= go []
+  where go :: [FilePath]
+           -> FreeF (HppF src) a (HppT src m a)
+           -> m (Either (FilePath, Error) (HppResult a))
+        go files (PureF x) = pure $ Right (HppResult files x)
+        go files (FreeF s) = case s of
+          ReadFile _ln file k -> runHppT (k mempty) >>= go (file:files)
+          ReadNext _ln file k -> runHppT (k mempty) >>= go (file:files)
+          WriteOutput output k -> sink output >> runHppT k >>= go files
+{-# SPECIALIZE expandHpp ::
+    ([String] -> Parser (StateT HppState
+                                (ExceptT Error
+                                         (State ([String] -> [String]))))
+                        [TOKEN] ())
+ -> HppT [String] (Parser (StateT HppState
+                                  (ExceptT Error
+                                           (State ([String] -> [String]))))
+                          [TOKEN]) a
+ -> Parser (StateT HppState
+                   (ExceptT Error (State ([String] -> [String]))))
+           [TOKEN] (Either (FilePath,Error) (HppResult a)) #-}
 
 -- * Preprocessor
 

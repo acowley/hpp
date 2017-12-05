@@ -1,12 +1,18 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving, TupleSections #-}
 -- | Front-end interface to the pre-processor.
-module Hpp (parseDefinition, preprocess,
-            T.HppState, emptyHppState, initHppState, addDefinition,
-            runHpp, streamHpp, HppT, HppOutput(..)) where
+module Hpp ( -- * Running the Preprocessor
+            preprocess, runHpp, streamHpp, expand,
+            -- * Preprocessor State
+            T.HppState, emptyHppState, initHppState,
+            -- * Adding Definitions
+            parseDefinition, addDefinition,
+            -- * Core Types
+             HppT, HppOutput(..)
+            ) where
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Trans.Class (lift, MonadTrans)
-import Control.Monad.Trans.Except (ExceptT, throwE)
-import Control.Monad.Trans.State.Strict (StateT, runStateT)
+import Control.Monad.Trans.Except (ExceptT, Except, throwE, runExceptT)
+import qualified Control.Monad.Trans.State.Strict as S
 import Data.ByteString.Char8 (ByteString)
 import Data.IORef
 import Data.Maybe (fromMaybe)
@@ -22,7 +28,7 @@ import Hpp.Tokens (tokenize)
 -- executed with 'runHpp' or 'streamHpp'.
 newtype HppT m a =
   HppT (T.HppT [ByteString]
-               (Parser (StateT T.HppState (ExceptT T.Error m))
+               (Parser (S.StateT T.HppState (ExceptT T.Error m))
                        [T.TOKEN])
                a)
   deriving (Functor, Applicative, Monad)
@@ -63,13 +69,34 @@ streamHpp :: MonadIO m
           -> HppT m a
           -> ExceptT T.Error m ([FilePath], T.HppState)
 streamHpp st snk (HppT h) =
-  do (a, st') <- runStateT
-                   (evalParse
-                      (R.runHpp (liftIO . readLines)
-                                (lift . lift . lift . snk) h)
-                      [])
-                   st
+  do (a, st') <- S.runStateT
+                     (evalParse
+                        (R.runHpp (liftIO . readLines)
+                                  (lift . lift . lift . snk) h)
+                        [])
+                     st
      either (throwE . snd) (return . (,st') . R.hppFilesRead) a
+
+-- | Like 'runHpp', but does not access the filesystem. Run a
+-- preprocessor action with some initial state. Returns the result of
+-- preprocessing as well as an updated preprocessor state
+-- representation. Since this operation performs no IO, @#include@ directives are ignored in terms of the generated output lines, but the files named in those directive are available in the 'HppOutput' value returned.
+expand :: T.HppState
+       -> HppT (S.State ([ByteString] -> [ByteString])) a
+       -> Except T.Error (HppOutput, T.HppState)
+expand st (HppT h) =
+  case result of
+    Left e -> throwE e
+    Right (Left (_, e), _) -> throwE e
+    Right (Right x, st') ->
+      return (HppOutput (R.hppFilesRead x) (outDlist []), st')
+  where snk xs = S.modify (. (xs++))
+        expanded = (S.runStateT
+                      (evalParse
+                         (R.expandHpp (lift . lift . lift . snk) h)
+                         [])
+                      st)
+        (result, outDlist) = S.runState (runExceptT expanded) id
 
 -- | An 'T.HppState' containing no macro definitions, and default
 -- values for the starting configuration: the name of the current file

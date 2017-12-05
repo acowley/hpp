@@ -1,3 +1,6 @@
+# 0.5.1
+Added the `expand` API for pure macro processing (i.e. `#include`s are ignored).
+
 # 0.5.0
 - Redesigned library API
 The `Hpp` module exports the main pieces. `Hpp.Env`, `Hpp.Types`, and `Hpp.Config` may be used for configuring the preprocessor.
