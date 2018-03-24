@@ -180,7 +180,7 @@ functionMacro params body = paste
                 go (t:ts) = Rescan t : go ts
         prepStringify [] = []
         prepStringify (Important "#" : ts) =
-          case dropWhile (not . isImportant) ts of
+          case ts of
             (Important t : ts') -> Important (cons '#' t) : prepStringify ts'
             _ -> Important "#" : ts
         prepStringify (t:ts) = t : prepStringify ts
