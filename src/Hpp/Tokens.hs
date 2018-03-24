@@ -8,6 +8,7 @@ import Control.Arrow (first, second)
 import Data.Char (isAlphaNum, isDigit, isSpace, isOctDigit, isHexDigit, digitToInt)
 import Data.Foldable (foldl')
 import Data.Monoid ((<>))
+import Data.Maybe (fromJust)
 import Data.String (IsString, fromString)
 import Hpp.StringSig
 
@@ -95,16 +96,26 @@ tokWords s =
             '\\' :. cs ->
               case sbreak (boolJust . (== '\'')) cs of
                 Nothing -> [Important (pre' <> pos)]
-                Just (_,esc,pos') ->
-                  let esc' = if sall isOctDigit esc
-                             then Important (digitsFromBase 8 esc)
-                             else case esc of
-                                    'x' :. hs
-                                      | sall isHexDigit hs ->
-                                      Important (digitsFromBase 16 hs)
-                                    (escapeChar -> Just e) :. Nil -> Important e
-                                    _ -> Important ("'\\" <> snoc esc '\'')
-                  in  maybeImp pre ++ esc' : tokWords pos'
+                Just (_,esc,pos')
+                  -- Deals with the '\'' case
+                  | isEmpty esc ->
+                    case sbreak (boolJust . (== '\'')) pos' of
+                      Just (_,esc', pos'')
+                        | isEmpty esc' ->
+                          Important ("'\\\''") : tokWords pos''
+                          -- Important (fromJust $ escapeChar '\'') : tokWords pos''
+                      _ -> [Important (pre' <> pos)]
+                  | otherwise ->
+                    let esc' = Important ("'\\" <> snoc esc '\'')
+                    -- let esc' = if sall isOctDigit esc
+                    --           then Important (digitsFromBase 8 esc)
+                    --           else case esc of
+                    --                   'x' :. hs
+                    --                     | sall isHexDigit hs ->
+                    --                     Important (digitsFromBase 16 hs)
+                    --                   (escapeChar -> Just e) :. Nil -> Important e
+                    --                   _ -> Important ("'\\" <> snoc esc '\'')
+                    in  maybeImp pre ++ esc' : tokWords pos'
             c:.('\'':.cs) -> maybeImp pre
                                 ++ Important (fromString ['\'', c, '\''])
                                 : tokWords cs
