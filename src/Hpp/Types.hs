@@ -91,6 +91,7 @@ data HppState = HppState { hppConfig :: Config
                          , hppEnv :: Env
                            -- ^ Preprocessor binding environment
                          }
+  deriving Show
 
 -- | A free monad construction to strictly delimit what capabilities
 -- we need to perform pre-processing.

@@ -25,6 +25,7 @@ import Hpp.Parser (Parser, ParserT, replace, await, awaitJust, droppingWhile,
                    precede, takingWhile, insertInputSegment, onElements,
                    evalParse, onInputSegment)
 import Hpp.StringSig
+import Hpp.String (stripAngleBrackets)
 import Hpp.Tokens (Token(..), importants, isImportant, newLine, trimUnimportant,
                    detokenize, notImportant, tokenize, skipLiteral)
 import Hpp.Types
@@ -268,7 +269,8 @@ runHpp cfg source sink m = runHppT m >>= go []
           WriteOutput output k -> sink output >> runHppT k >>= go files
 
         readAux _files ln file _ Nothing =
-          pure (Left (curFileName cfg, IncludeDoesNotExist ln file))
+          Left . (, IncludeDoesNotExist ln (stripAngleBrackets file))
+               . curFileName <$> use config
         readAux files _ln _file k (Just file') =
           source file' >>= runHppT . k >>= go files
 {-# SPECIALIZE runHpp ::
@@ -444,10 +446,10 @@ directive = lift (onElements (awaitJust "directive")) >>= aux
                         let tokStr = toChars (detokenize toks)
                         throwError $ UserError ln (tokStr++" ("++curFile++")")
           "warning" -> True <$ lift dropLine -- warnings not yet supported
-          -- t -> do toks <- lift takeLine
-          --         ln <- subtract 1 <$> use lineNum
-          --         throwError $ UnknownCommand ln (detokenize (Important t:toks))
-          _ -> return False -- Ignore unknown command
+          t -> do toks <- lift takeLine
+                  ln <- subtract 1 <$> use lineNum
+                  throwError $ UnknownCommand ln
+                    (toChars (detokenize (Important t:toks)))
         aux _ = error "Impossible unimportant directive"
         includeAux :: (LineNum -> FilePath -> HppT src (Parser m [TOKEN]) [String])
                    -> HppT src (Parser m [TOKEN]) ()

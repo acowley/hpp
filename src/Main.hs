@@ -40,7 +40,7 @@ usage = mapM_ putStrLn
 main :: IO ()
 main = do getArgs >>= \case
             [] -> usage
-            args -> runWithArgs args
+            args -> runWithArgs args >> return ()
 
 
 {-

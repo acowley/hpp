@@ -1,3 +1,4 @@
+{-# LANGUAGE StandaloneDeriving, FlexibleInstances #-}
 -- | Preprocessor Configuration
 module Hpp.Config where
 import Data.Functor.Identity
@@ -47,6 +48,8 @@ data ConfigF f = Config { curFileNameF        :: f FilePath
 
 -- | A fully-populated configuration for the pre-processor.
 type Config = ConfigF Identity
+
+deriving instance Show (ConfigF Identity)
 
 -- | Ensure that required configuration fields are supplied.
 realizeConfig :: ConfigF Maybe -> Maybe Config

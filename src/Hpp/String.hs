@@ -1,6 +1,7 @@
 {-# LANGUAGE BangPatterns #-}
 -- | HELPERS for working with 'String's
-module Hpp.String (stringify, unquote, trimSpaces, breakOn, cons) where
+module Hpp.String (stringify, unquote, stripAngleBrackets, trimSpaces, breakOn, cons)
+  where
 import Data.Char (isSpace)
 import Data.List (isPrefixOf, find)
 
@@ -16,11 +17,22 @@ stringify s = '"' : concatMap aux (strip s) ++ "\""
 
 -- | Remove double quote characters from the ends of a string.
 unquote :: String -> String
-unquote ('"':xs) = go xs
-  where go ['"'] = []
+unquote = stripEnds '"' '"'
+
+-- | Remove angle brackets from the ends of a string.
+stripAngleBrackets :: String -> String
+stripAngleBrackets = stripEnds '<' '>'
+
+stripEnds :: Char -> Char -> String -> String
+stripEnds start end s =
+  case s of
+    (start':rest)
+      | start == start' -> go rest
+    _ -> s
+  where go (c:[])
+          | c == end = []
         go [] = []
         go (c:cs) = c : go cs
-unquote xs = xs
 
 -- | Trim trailing spaces from a 'String'
 trimSpaces :: String -> String
