@@ -6,6 +6,7 @@ import qualified Data.List as L
 import Data.Maybe (isJust)
 import Data.String (IsString)
 import qualified Hpp.String as S
+import Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as B
 import qualified Data.ByteString.Lazy.Char8 as BL
 import System.IO (Handle, hPutStr)
@@ -175,7 +176,7 @@ instance Stringy B.ByteString where
   sall = B.all
   sIsPrefixOf = B.isPrefixOf
   isEmpty = B.null
-  readLines = fmap (map BL.toStrict . BL.lines) . BL.readFile
+  readLines = fmap (map stripR . map BL.toStrict . BL.lines) . BL.readFile
   {-# INLINE readLines #-}
   putStringy = B.hPutStr
   toChars = B.unpack
@@ -195,6 +196,12 @@ sdropWhile f s = case sbreak (boolJust . f) s of
                    Nothing -> s
                    Just (_, _, s') -> s'
 {-# INLINE sdropWhile #-}
+
+stripR :: ByteString -> ByteString
+stripR bs
+  | not (B.null bs) && B.last bs == '\r' = B.init bs
+  | otherwise = bs
+{-# INLINE stripR #-}
 
 #if __GLASGOW_HASKELL__ >= 800
 pattern (:.) :: Stringy s => Char -> s -> s
