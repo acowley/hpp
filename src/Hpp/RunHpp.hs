@@ -573,16 +573,15 @@ macroExpansion :: (Monad m, HppCaps m)
 macroExpansion = do
   lift await >>= \case
     Nothing -> return Nothing
+    Just ln@(Important "#":rst) -> do
+      lift (replace (dropWhile notImportant rst))
+      processed <- directive
+      if processed
+        then macroExpansion
+        else Just ln <$ lift takeLine
     Just ln ->
-      -- when (not (all isSpace (detokenize ln)))
-      --      (trace ("macro expand: "++detokenize ln) (return ())) >>
       case dropWhile notImportant ln of
         [] -> Just ln <$ (lineNum %= (+1))
-        Important "#":rst -> do lift (replace (dropWhile notImportant rst))
-                                processed <- directive
-                                if processed
-                                then macroExpansion
-                                else Just ln <$ lift takeLine
         _ -> lift (replace ln >> (Just <$> expandLineP)) <* (lineNum %= (+1))
 
 -- | The dynamic capabilities offered by HPP
