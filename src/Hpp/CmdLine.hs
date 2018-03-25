@@ -89,7 +89,7 @@ parseArgs cfg0 = go emptyEnv id cfg0 Nothing . concatMap breakEqs
           return . Left $ BadCommandLine "Multiple output files given"
 
 -- | Run Hpp with the given commandline arguments.
-runWithArgs :: [String] -> IO ()
+runWithArgs :: [String] -> IO (Maybe Error)
 runWithArgs args =
   do cfgNow <- defaultConfigFNow
      let args' = concatMap splitSwitches args
@@ -107,16 +107,12 @@ runWithArgs args =
                                     flip openFile WriteMode
                                return ( \os -> mapM_ (putStringy h) os
                                       , hClose h )
-     let errorExcept = fmap (either (error . show) id) . runExceptT
-     _ <- readLines fileName
-           >>= errorExcept
+     result <- readLines fileName
+           >>= runExceptT
                . streamHpp (initHppState cfg' env) snk
                . preprocess
                . (map fromString lns ++)
-     -- (lns', _) <- readLines fileName
-     --              >>= errorExcept
-     --                  . runHpp (initHppState cfg' env)
-     --                  . preprocess
-     --                  . (map fromString lns ++)
-     -- snk (hppOutput lns')
      closeSnk
+     case result of
+       Left error -> return $ Just error
+       _ -> return Nothing

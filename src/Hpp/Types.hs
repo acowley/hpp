@@ -87,6 +87,7 @@ instance Functor f => Functor (FreeF f a) where
 data HppState = HppState { hppConfig :: Config
                          , hppLineNum :: LineNum
                          , hppEnv :: Env }
+  deriving Show
 
 -- | A free monad construction to strictly delimit what capabilities
 -- we need to perform pre-processing.
