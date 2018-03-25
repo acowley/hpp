@@ -30,7 +30,7 @@ import Hpp.Tokens (Token(..), importants, isImportant, newLine, trimUnimportant,
                    detokenize, notImportant, tokenize, skipLiteral)
 import Hpp.Types
 import System.Directory (doesFileExist)
-import System.FilePath ((</>))
+import System.FilePath ((</>), takeDirectory)
 import Text.Read (readMaybe)
 import Prelude hiding (String)
 import qualified Prelude as P
@@ -214,24 +214,25 @@ streamNewFile fp s =
 
 -- * Finding @include@ files
 
-includeCandidates :: [FilePath] -> P.String -> Maybe [FilePath]
-includeCandidates searchPath nm =
+includeCandidates :: FilePath -> [FilePath] -> P.String -> Maybe [FilePath]
+includeCandidates currentFile searchPath nm =
   case nm of
-    '<':nm' -> Just $ sysSearch (init nm')
-    '"':nm' -> let nm'' = init nm'
-                in Just $ nm'' : sysSearch nm''
+    '<':nm' -> Just $ sysSearch   (init nm')
+    '"':nm' -> Just $ localSearch (init nm')
     _ -> Nothing
-  where sysSearch f = map (</> f) searchPath
+  where sysSearch   f = map (</> f) searchPath
+        localSearch f = map (</> f) $ takeDirectory currentFile : searchPath
 
-searchForInclude :: [FilePath] -> P.String -> IO (Maybe FilePath)
-searchForInclude paths = maybe (return Nothing) aux . includeCandidates paths
+searchForInclude :: FilePath -> [FilePath] -> P.String -> IO (Maybe FilePath)
+searchForInclude curFile paths =
+  maybe (return Nothing) aux . includeCandidates curFile paths
   where aux [] = return Nothing
         aux (f:fs) = do exists <- doesFileExist f
                         if exists then return (Just f) else aux fs
 
-searchForNextInclude :: [FilePath] -> P.String -> IO (Maybe FilePath)
-searchForNextInclude paths = maybe (return Nothing) (aux False)
-                           . includeCandidates paths
+searchForNextInclude :: FilePath -> [FilePath] -> P.String -> IO (Maybe FilePath)
+searchForNextInclude curFile paths =
+  maybe (return Nothing) (aux False) . includeCandidates curFile paths
   where aux _ [] = return Nothing
         aux n (f:fs) = do exists <- doesFileExist f
                           if exists
@@ -260,12 +261,18 @@ runHpp cfg source sink m = runHppT m >>= go []
            -> m (Either (FilePath, Error) (HppResult a))
         go files (PureF x) = return $ Right (HppResult files x)
         go files (FreeF s) = case s of
-          ReadFile ln file k ->
-            liftIO (searchForInclude (includePaths cfg) file)
-            >>= readAux (file:files) ln file k
-          ReadNext ln file k ->
-            liftIO (searchForNextInclude (includePaths cfg) file)
-            >>= readAux (file:files) ln file k
+          ReadFile ln file k -> do
+            cfg <- use config
+            let ipaths = includePaths cfg
+                currentFile = curFileName cfg
+            mFound <- liftIO $ searchForInclude currentFile ipaths file
+            readAux (file:files) ln file k mFound
+          ReadNext ln file k -> do
+            cfg <- use config
+            let ipaths = includePaths cfg
+                currentFile = curFileName cfg
+            mFound <- liftIO $ searchForNextInclude currentFile ipaths file
+            readAux (file:files) ln file k mFound
           WriteOutput output k -> sink output >> runHppT k >>= go files
 
         readAux _files ln file _ Nothing =
