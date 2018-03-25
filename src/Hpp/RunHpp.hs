@@ -218,7 +218,8 @@ includeCandidates :: FilePath -> [FilePath] -> P.String -> Maybe [FilePath]
 includeCandidates currentFile searchPath nm =
   case nm of
     '<':nm' -> Just $ sysSearch   (init nm')
-    '"':nm' -> Just $ localSearch (init nm')
+    '"':nm' -> let nm'' = init nm'
+               in Just $ nm'' : localSearch nm''
     _ -> Nothing
   where sysSearch   f = map (</> f) searchPath
         localSearch f = map (</> f) $ takeDirectory currentFile : searchPath
