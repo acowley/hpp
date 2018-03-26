@@ -35,7 +35,7 @@ echo 'Building hpp'
 if [ -z "$TRAVIS" ]; then
   (cd .. && stack build hpp:hpp)
 else
-  (cd .. && cabal build)
+  (cd .. && cabal new-build)
 fi
 if ! [ $? -eq 0 ]; then
   echo 'Building hpp failed'
@@ -58,10 +58,10 @@ if [ -z "$TRAVIS" ]; then
       Darwin)
           (cd mcpp-2.7.2/test-c &&  ../tool/cpp_test HPP "$(cd ../../.. && stack exec which -- hpp) -I/usr/include ${GCCDIR} --cpp -D__i386__ -D__DARWIN_ONLY_UNIX_CONFORMANCE %s.c | gcc -o %s -w -x c -" "rm %s" < n_i_.lst)
           ;;
-      *) (cd mcpp-2.7.2/test-c &&  ../tool/cpp_test HPP "$(find ../../../.stack-work -type f -executable -name hpp -print -quit) -I/usr/include ${GCCDIR} --cpp -D__x86_64__ %s.c | gcc -o %s -w -x c -" "rm %s" < n_i_.lst)
+      *) (cd mcpp-2.7.2/test-c &&  ../tool/cpp_test HPP "$(find $(pwd)/../../../.stack-work -type f -executable -name hpp -print -quit) ${GCCDIR} --cpp -D__x86_64__ %s.c | gcc -o %s -w -x c -" "rm %s" < n_i_.lst)
   esac
 else
-  (cd mcpp-2.7.2/test-c &&  ../tool/cpp_test HPP "$(find ../../../dist -type f -executable -name hpp) -I/usr/include ${GCCDIR} --cpp -D__x86_64__ %s.c | gcc -o %s -w -x c -" "rm %s" < n_i_.lst)
+  (cd mcpp-2.7.2/test-c &&  ../tool/cpp_test HPP "$(find $(pwd)/../../../../dist-newstyle -type f -executable -name hpp) ${GCCDIR} --cpp -D__x86_64__ %s.c | gcc -o %s -w -x c -" "rm %s" < n_i_.lst)
 fi
 
 if ! [ $? -eq 0 ]; then
