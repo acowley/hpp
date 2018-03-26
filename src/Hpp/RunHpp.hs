@@ -207,6 +207,9 @@ streamNewFile fp s =
                             let cfg = hppConfig st
                                 cfg' = cfg { curFileNameF = pure fp }
                                 ln = hppLineNum st
+                            -- NOTE: We should *NOT* use a the config lens here
+                            --       because it will mutate the directory which
+                            --       we *don't* want in this instance.
                             setState (st {hppConfig = cfg', hppLineNum = 1})
                             return (cfg, ln)
      insertInputSegment
