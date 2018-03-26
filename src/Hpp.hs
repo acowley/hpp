@@ -71,8 +71,10 @@ streamHpp :: MonadIO m
 streamHpp st snk (HppT h) =
   do (a, st') <- S.runStateT
                      (evalParse
-                        (R.runHpp (liftIO . readLines)
-                                  (lift . lift . lift . snk) h)
+                        (R.runHpp (T.hppConfig st)
+                                  (liftIO . readLines)
+                                  (lift . lift . lift . snk)
+                                  h)
                         [])
                      st
      either (throwE . snd) (return . (,st') . R.hppFilesRead) a
@@ -80,7 +82,10 @@ streamHpp st snk (HppT h) =
 -- | Like 'runHpp', but does not access the filesystem. Run a
 -- preprocessor action with some initial state. Returns the result of
 -- preprocessing as well as an updated preprocessor state
--- representation. Since this operation performs no IO, @#include@ directives are ignored in terms of the generated output lines, but the files named in those directive are available in the 'HppOutput' value returned.
+-- representation. Since this operation performs no IO, @#include@
+-- directives are ignored in terms of the generated output lines, but
+-- the files named in those directive are available in the 'HppOutput'
+-- value returned.
 expand :: T.HppState
        -> HppT (S.State ([ByteString] -> [ByteString])) a
        -> Except T.Error (HppOutput, T.HppState)
