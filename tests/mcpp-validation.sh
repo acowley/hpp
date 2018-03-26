@@ -8,7 +8,7 @@ GCC=gcc
 # with BSD or OS X head.
 
 # Get the include paths GCC will use by default.
-GCCDIR=($(echo | ${GCC} -E -v - 2>&1 | sed -n '/#include <...> search starts/,/End of search list/ p' | tail -n +2 | sed '$ d' | grep -v '(framework directory)' | sed 's/^[[:space:]]*//'))
+GCCDIR=($(${GCC} -xc -E -v /dev/null 2>&1 | sed -n '/#include <...> search starts/,/End of search list/p' | tail -n +2 | sed '$ d' | grep -v '(framework directory)' | sed 's/^[[:space:]]*//' | tac))
 
 if (! [ $? -eq 0 ]) || [ -z "${GCCDIR}" ]; then
   GCCDIR=""
@@ -52,10 +52,16 @@ echo 'Running the validation suite'
 # Note that we define __i386__ as the architecture as the MCPP
 # validation test n_12.c assumes a long is 32 bits.
 
+
 if [ -z "$TRAVIS" ]; then
-  (cd mcpp-2.7.2/test-c &&  ../tool/cpp_test HPP "$(cd ../../.. && stack exec which -- hpp) -I/usr/include ${GCCDIR} --cpp -D__i386__ -D__DARWIN_ONLY_UNIX_CONFORMANCE %s.c | gcc -o %s -w -x c -" "rm %s" < n_i_.lst)
+  case $(uname -s) in
+      Darwin)
+          (cd mcpp-2.7.2/test-c &&  ../tool/cpp_test HPP "$(cd ../../.. && stack exec which -- hpp) -I/usr/include ${GCCDIR} --cpp -D__i386__ -D__DARWIN_ONLY_UNIX_CONFORMANCE %s.c | gcc -o %s -w -x c -" "rm %s" < n_i_.lst)
+          ;;
+      *) (cd mcpp-2.7.2/test-c &&  ../tool/cpp_test HPP "$(find ../../../.stack-work -type f -executable -name hpp -print -quit) -I/usr/include ${GCCDIR} --cpp -D__x86_64__ %s.c | gcc -o %s -w -x c -" "rm %s" < n_i_.lst)
+  esac
 else
-  (cd mcpp-2.7.2/test-c &&  ../tool/cpp_test HPP "$(find ../../../dist -type f -executable -name hpp) -I/usr/include ${GCCDIR} --cpp -D__i386__ -D__DARWIN_ONLY_UNIX_CONFORMANCE %s.c | gcc -o %s -w -x c -" "rm %s" < n_i_.lst)
+  (cd mcpp-2.7.2/test-c &&  ../tool/cpp_test HPP "$(find ../../../dist -type f -executable -name hpp) -I/usr/include ${GCCDIR} --cpp -D__x86_64__ %s.c | gcc -o %s -w -x c -" "rm %s" < n_i_.lst)
 fi
 
 if ! [ $? -eq 0 ]; then
