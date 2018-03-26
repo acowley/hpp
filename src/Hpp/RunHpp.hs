@@ -215,25 +215,25 @@ streamNewFile fp s =
 -- * Finding @include@ files
 
 includeCandidates :: FilePath -> [FilePath] -> P.String -> Maybe [FilePath]
-includeCandidates currentFile searchPath nm =
+includeCandidates curDir searchPath nm =
   case nm of
     '<':nm' -> Just $ sysSearch   (init nm')
     '"':nm' -> let nm'' = init nm'
                in Just $ nm'' : localSearch nm''
     _ -> Nothing
   where sysSearch   f = map (</> f) searchPath
-        localSearch f = map (</> f) $ takeDirectory currentFile : searchPath
+        localSearch f = map (</> f) $ curDir : searchPath
 
 searchForInclude :: FilePath -> [FilePath] -> P.String -> IO (Maybe FilePath)
-searchForInclude curFile paths =
-  maybe (return Nothing) aux . includeCandidates curFile paths
+searchForInclude curDir paths =
+  maybe (return Nothing) aux . includeCandidates curDir paths
   where aux [] = return Nothing
         aux (f:fs) = do exists <- doesFileExist f
                         if exists then return (Just f) else aux fs
 
 searchForNextInclude :: FilePath -> [FilePath] -> P.String -> IO (Maybe FilePath)
-searchForNextInclude curFile paths =
-  maybe (return Nothing) (aux False) . includeCandidates curFile paths
+searchForNextInclude curDir paths =
+  maybe (return Nothing) (aux False) . includeCandidates curDir paths
   where aux _ [] = return Nothing
         aux n (f:fs) = do exists <- doesFileExist f
                           if exists
@@ -263,16 +263,16 @@ runHpp cfg source sink m = runHppT m >>= go []
         go files (PureF x) = return $ Right (HppResult files x)
         go files (FreeF s) = case s of
           ReadFile ln file k -> do
-            cfg <- use config
+            cfg    <- use config
+            curDir <- use dir
             let ipaths = includePaths cfg
-                currentFile = curFileName cfg
-            mFound <- liftIO $ searchForInclude currentFile ipaths file
+            mFound <- liftIO $ searchForInclude curDir ipaths file
             readAux (file:files) ln file k mFound
           ReadNext ln file k -> do
-            cfg <- use config
+            cfg    <- use config
+            curDir <- use dir
             let ipaths = includePaths cfg
-                currentFile = curFileName cfg
-            mFound <- liftIO $ searchForNextInclude currentFile ipaths file
+            mFound <- liftIO $ searchForNextInclude curDir ipaths file
             readAux (file:files) ln file k mFound
           WriteOutput output k -> sink output >> runHppT k >>= go files
 

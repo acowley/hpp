@@ -18,6 +18,7 @@ import Hpp.StringSig (toChars)
 import Hpp.Tokens
 import Prelude hiding (String)
 import qualified Prelude as P
+import System.FilePath (takeDirectory)
 
 -- | Line numbers are represented as 'Int's
 type LineNum = Int
@@ -86,6 +87,8 @@ instance Functor f => Functor (FreeF f a) where
 -- | Dynamic state of the preprocessor engine.
 data HppState = HppState { hppConfig :: Config
                            -- ^ Initial configuration
+                         , hppCurDir :: FilePath
+                           -- ^ Directory of input file
                          , hppLineNum :: LineNum
                            -- ^ Current line number of input file
                          , hppEnv :: Env
@@ -253,18 +256,22 @@ over l f = runIdentity . l (Identity . f)
 -- * State Lenses
 
 emptyHppState :: Config -> HppState
-emptyHppState cfg = HppState cfg 1 emptyEnv
+emptyHppState cfg = HppState cfg (takeDirectory (curFileName cfg)) 1 emptyEnv
 
 config :: Lens HppState Config
-config f (HppState cfg ln e) = (\cfg' -> HppState cfg' ln e) <$> f cfg
+config f (HppState cfg dir ln e) = (\cfg' -> HppState cfg' dir ln e) <$> f cfg
 {-# INLINE config #-}
 
+dir :: Lens HppState FilePath
+dir f (HppState cfg dir ln e) = (\dir' -> HppState cfg dir' ln e) <$> f dir
+{-# INLINE dir #-}
+
 lineNum :: Lens HppState LineNum
-lineNum f (HppState cfg ln e) = (\ln' -> HppState cfg ln' e) <$> f ln
+lineNum f (HppState cfg dir ln e) = (\ln' -> HppState cfg dir ln' e) <$> f ln
 {-# INLINE lineNum #-}
 
 env :: Lens HppState Env
-env f (HppState cfg ln e) = (\e' -> HppState cfg ln e') <$> f e
+env f (HppState cfg dir ln e) = (\e' -> HppState cfg dir ln e') <$> f e
 {-# INLINE env #-}
 
 use :: (HasHppState m, Functor m) => Lens HppState a -> m a

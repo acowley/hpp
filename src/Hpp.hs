@@ -20,6 +20,7 @@ import qualified Hpp.Config as C
 import qualified Hpp.Env as E
 import qualified Hpp.RunHpp as R
 import qualified Hpp.Types as T
+import Hpp.Types (setL, config, env, lineNum)
 import Hpp.Parser (evalParse, Parser)
 import Hpp.StringSig (readLines)
 import Hpp.Tokens (tokenize)
@@ -116,7 +117,7 @@ emptyHppState = T.emptyHppState
 
 -- | Create a 'T.HppState' with the given 'C.Config' and 'T.Env'.
 initHppState :: C.Config -> T.Env -> T.HppState
-initHppState c e = T.HppState c 1 e
+initHppState c e = setL lineNum 1 . setL env e . setL config c $ emptyHppState
 
 -- | @addDefinition name expression@ adds a binding of @name@ to
 -- @expression@ in the preprocessor’s internal state.
