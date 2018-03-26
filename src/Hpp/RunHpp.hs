@@ -247,33 +247,33 @@ data HppResult a = HppResult { hppFilesRead :: [FilePath]
 -- | Interpret the IO components of the preprocessor. This
 -- implementation relies on IO for the purpose of checking search
 -- paths for included files.
-runHpp :: forall m a src. (MonadIO m, HasHppState m)
-       => (FilePath -> m src)
+runHpp :: forall m a src. (MonadIO m)
+       => Config
+       -> (FilePath -> m src)
        -> (src -> m ())
        -> HppT src m a
        -> m (Either (FilePath,Error) (HppResult a))
-runHpp source sink m = runHppT m >>= go []
+runHpp cfg source sink m = runHppT m >>= go []
   where go :: [FilePath]
            -> FreeF (HppF src) a (HppT src m a)
            -> m (Either (FilePath, Error) (HppResult a))
         go files (PureF x) = return $ Right (HppResult files x)
         go files (FreeF s) = case s of
           ReadFile ln file k ->
-            (includePaths <$> use config)
-            >>= liftIO . flip searchForInclude file
+            liftIO (searchForInclude (includePaths cfg) file)
             >>= readAux (file:files) ln file k
           ReadNext ln file k ->
-            (includePaths <$> use config)
-            >>= liftIO . flip searchForNextInclude file
+            liftIO (searchForNextInclude (includePaths cfg) file)
             >>= readAux (file:files) ln file k
           WriteOutput output k -> sink output >> runHppT k >>= go files
 
         readAux _files ln file _ Nothing =
-          Left . (, IncludeDoesNotExist ln file) . curFileName <$> use config
+          pure (Left (curFileName cfg, IncludeDoesNotExist ln file))
         readAux files _ln _file k (Just file') =
           source file' >>= runHppT . k >>= go files
 {-# SPECIALIZE runHpp ::
-    (FilePath -> Parser (StateT HppState (ExceptT Error IO)) [TOKEN] [String])
+    Config
+ -> (FilePath -> Parser (StateT HppState (ExceptT Error IO)) [TOKEN] [String])
  -> ([String] -> Parser (StateT HppState (ExceptT Error IO)) [TOKEN] ())
  -> HppT [String] (Parser (StateT HppState (ExceptT Error IO)) [TOKEN]) a
  -> Parser (StateT HppState (ExceptT Error IO)) [TOKEN] (Either (FilePath,Error) (HppResult a)) #-}
@@ -673,7 +673,7 @@ hppIOSink' :: Config -> Env -> ([String] -> IO ()) -> [String]
 hppIOSink' cfg env' snk src =
   fmap (fmap hppFilesRead)
   . dischargeHppCaps cfg env' $
-  runHpp (liftIO . readLines) (liftIO . snk) (preprocess src)
+  runHpp cfg (liftIO . readLines) (liftIO . snk) (preprocess src)
 
 -- | General hpp runner against input source file lines. Output lines
 -- are fed to the caller-supplied sink function. Any errors
