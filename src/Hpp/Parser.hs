@@ -14,11 +14,16 @@ import Data.Monoid ((<>))
 
 -- * Parsers
 
+-- | Our input is a list of values each of which is either an action or a value.
 type RopeM m a = [Either (m ()) a]
 
--- | A 'Parser' is a bit of state carrying a source of input.
+-- | A 'ParserT' is a bit of state that carries a source of input.
 type ParserT m src i = StateT (Headspring m src i, src) m
 
+-- | A 'Parser' is a bit of state that carries a source of input
+-- consisting of a list of values which are either actions in an
+-- underlying monad or sequences of inputs. Thus we have chunks of
+-- input values with interspersed effects.
 type Parser m i = ParserT m (RopeM m [i]) i
 
 data Headspring m src i =
