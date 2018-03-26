@@ -259,7 +259,8 @@ emptyHppState :: Config -> HppState
 emptyHppState cfg = HppState cfg (takeDirectory (curFileName cfg)) 1 emptyEnv
 
 config :: Lens HppState Config
-config f (HppState cfg dir ln e) = (\cfg' -> HppState cfg' dir ln e) <$> f cfg
+config f (HppState cfg dir ln e) =
+  (\cfg' -> HppState cfg' (takeDirectory (curFileName cfg')) ln e) <$> f cfg
 {-# INLINE config #-}
 
 dir :: Lens HppState FilePath
