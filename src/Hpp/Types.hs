@@ -85,8 +85,12 @@ instance Functor f => Functor (FreeF f a) where
 
 -- | Dynamic state of the preprocessor engine.
 data HppState = HppState { hppConfig :: Config
+                           -- ^ Initial configuration
                          , hppLineNum :: LineNum
-                         , hppEnv :: Env }
+                           -- ^ Current line number of input file
+                         , hppEnv :: Env
+                           -- ^ Preprocessor binding environment
+                         }
 
 -- | A free monad construction to strictly delimit what capabilities
 -- we need to perform pre-processing.
