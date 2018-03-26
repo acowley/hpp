@@ -2,7 +2,7 @@
 -- | A front-end to run Hpp with textual arguments as from a command
 -- line invocation.
 module Hpp.CmdLine (runWithArgs) where
-import Control.Monad (unless)
+import Control.Monad (unless, (>=>))
 import Control.Monad.Trans.Except (runExceptT)
 import Data.String (fromString)
 import Hpp
@@ -101,18 +101,19 @@ runWithArgs args =
      let fileName = curFileName cfg
          cfg' = cfg { curFileNameF = pure fileName }
      (snk, closeSnk) <- case outPath of
-                          Nothing -> return (mapM_ (putStringy stdout) , return ())
+                          Nothing -> return ( mapM_ (putStringy stdout)
+                                            , return () )
                           Just f ->
                             do h <- makeAbsolute f >>=
                                     flip openFile WriteMode
                                return ( \os -> mapM_ (putStringy h) os
                                       , hClose h )
-     let errorExcept = fmap (either (error . show) id) . runExceptT
+     let errorExcept = runExceptT >=> either (error . show) pure
      _ <- readLines fileName
-           >>= errorExcept
-               . streamHpp (initHppState cfg' env) snk
-               . preprocess
-               . (map fromString lns ++)
+            >>= errorExcept
+                . streamHpp (initHppState cfg' env) snk
+                . preprocess
+                . (map fromString lns ++)
      -- (lns', _) <- readLines fileName
      --              >>= errorExcept
      --                  . runHpp (initHppState cfg' env)
