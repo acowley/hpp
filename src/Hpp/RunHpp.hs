@@ -203,17 +203,21 @@ modifyState f = getState >>= setState . f
 streamNewFile :: (Monad m, HasHppState m)
               => FilePath -> [[TOKEN]] -> Parser m [TOKEN] ()
 streamNewFile fp s =
-  do (oldCfg,oldLine) <- do st <- getState
-                            let cfg = hppConfig st
-                                cfg' = cfg { curFileNameF = pure fp }
-                                ln = hppLineNum st
-                            -- NOTE: We should *NOT* use a the config lens here
-                            --       because it will mutate the directory which
-                            --       we *don't* want in this instance.
-                            setState (st {hppConfig = cfg', hppLineNum = 1})
-                            return (cfg, ln)
+  do (oldCfg,oldLine,oldFile) <- do
+       st <- getState
+       let cfg = hppConfig st
+           file = curFileName cfg
+           cfg' = cfg { curFileNameF = pure fp }
+           ln = hppLineNum st
+           -- NOTE: We should *NOT* use a the config lens here
+           --       because it will mutate the directory which
+           --       we *don't* want in this instance.
+       setState (st {hppConfig = cfg', hppLineNum = 1})
+       return (cfg, ln, file)
      insertInputSegment
-       s (modifyState (setL lineNum oldLine . setL config oldCfg))
+       ([yieldLineNumFile 1 (Just fp)]
+        ++ s ++ [yieldLineNumFile oldLine (Just oldFile)])
+       (modifyState (setL lineNum oldLine . setL config oldCfg))
 
 -- * Finding @include@ files
 
@@ -467,7 +471,6 @@ directive = lift (onElements (awaitJust "directive")) >>= aux
                                <$> expandLineP)
              ln <- use lineNum
              src <- prepareInput <*> readFun ln fileName
-             lineNum .= ln+1
              lift (streamNewFile (unquote fileName) src)
         {- SPECIALIZE includeAux ::
             (LineNum -> FilePath -> HppT [String] (Parser (StateT HppState (ExceptT Error IO)) [TOKEN]) [String])
@@ -549,7 +552,12 @@ takeBranchFun = go (1::Int)
 
 
 yieldLineNum :: LineNum -> [TOKEN]
-yieldLineNum !ln = [Important ("#line " <> fromString (show ln)), Other "\n"]
+yieldLineNum !ln = yieldLineNumFile ln Nothing
+
+yieldLineNumFile :: LineNum -> Maybe FilePath -> [TOKEN]
+yieldLineNumFile !ln !fp =
+  [Important ("#line " <> fromString (show ln) <> maybeFile), Other "\n"]
+  where maybeFile = maybe mempty (\f -> " \"" <> fromString f <> "\"") fp
 
 dropBranchLine :: (HasError m, Monad m)
                => LineNum -> Parser m [TOKEN] ([TOKEN], LineNum)
@@ -648,8 +656,10 @@ preprocess :: (Monad m, HppCaps m)
 preprocess src =
   do cfg <- getL config <$> getState
      prep <- prepareInput
-     let prepOutput = if inhibitLinemarkers cfg then aux else pure
-     lift (precede (prep src))
+     let prepOutput = pure
+           -- if inhibitLinemarkers cfg then aux else pure
+         addStartLinePrag tokens = yieldLineNumFile 1 (pure (curFileName cfg)) : tokens
+     lift (precede (addStartLinePrag (prep src)))
      parseStreamHpp (fmap (prepOutput . detokenize) <$> macroExpansion)
   where aux xs | sIsPrefixOf "#line" xs = []
                | otherwise = [xs]
