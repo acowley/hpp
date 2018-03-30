@@ -656,13 +656,12 @@ preprocess :: (Monad m, HppCaps m)
 preprocess src =
   do cfg <- getL config <$> getState
      prep <- prepareInput
-     let prepOutput = pure
-           -- if inhibitLinemarkers cfg then aux else pure
+     let prepOutput = if inhibitLinemarkers cfg then aux (curFileName cfg) else pure
          addStartLinePrag tokens = yieldLineNumFile 1 (pure (curFileName cfg)) : tokens
      lift (precede (addStartLinePrag (prep src)))
      parseStreamHpp (fmap (prepOutput . detokenize) <$> macroExpansion)
-  where aux xs | sIsPrefixOf "#line" xs = []
-               | otherwise = [xs]
+  where aux f xs | sIsPrefixOf "#line" xs && not (sIsInfixOf (fromString f) xs) = []
+                 | otherwise = [xs]
 
 -- Note: `preprocess` is the workhorse of the library. We run the
 -- value it returns in `hppIO'` by interleaving interpretation of

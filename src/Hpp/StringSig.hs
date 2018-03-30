@@ -45,6 +45,7 @@ class (IsString s, Monoid s) => Stringy s where
   sbreak :: (Char -> Maybe t) -> s -> Maybe (t,s,s)
   sall :: (Char -> Bool) -> s -> Bool
   sIsPrefixOf :: s -> s -> Bool
+  sIsInfixOf :: s -> s -> Bool
   isEmpty :: s -> Bool
   readLines :: FilePath -> IO [s]
   putStringy :: Handle -> s -> IO ()
@@ -88,6 +89,7 @@ instance Stringy String where
   sall = all
   {-# INLINE sall #-}
   sIsPrefixOf = L.isPrefixOf
+  sIsInfixOf = L.isInfixOf
   isEmpty = null
   {-# INLINE isEmpty #-}
   readLines = fmap lines . readFile
@@ -174,6 +176,7 @@ instance Stringy B.ByteString where
   {-# INLINE sbreak #-}
   sall = B.all
   sIsPrefixOf = B.isPrefixOf
+  sIsInfixOf = B.isInfixOf
   isEmpty = B.null
   readLines = fmap (map stripR . map BL.toStrict . BL.lines) . BL.readFile
   {-# INLINE readLines #-}
