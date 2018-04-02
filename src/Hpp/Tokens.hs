@@ -95,7 +95,16 @@ tokWords s =
             '\\' :. cs ->
               case sbreak (boolJust . (== '\'')) cs of
                 Nothing -> [Important (pre' <> pos)]
-                Just (_,esc,pos') ->
+
+                Just (_,esc,pos')
+                  | isEmpty esc ->
+                    case sbreak (boolJust . (== '\'')) pos' of
+                      Just (_,esc', pos'')
+                        | isEmpty esc' ->
+                          Important pre : Important ("'\\\''") : tokWords pos''
+                          -- Important (fromJust $ escapeChar '\'') : tokWords pos''
+                      _ -> [Important (pre' <> pos)]
+                  | otherwise ->
                   let esc' = if sall isOctDigit esc
                              then Important (digitsFromBase 8 esc)
                              else case esc of
