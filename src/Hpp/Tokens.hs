@@ -102,7 +102,7 @@ tokWords s =
                     case sbreak (boolJust . (== '\'')) pos' of
                       Just (_,esc', pos'')
                         | isEmpty esc' ->
-                          Important ("'\\\''") : tokWords pos''
+                          Important pre : Important ("'\\\''") : tokWords pos''
                           -- Important (fromJust $ escapeChar '\'') : tokWords pos''
                       _ -> [Important (pre' <> pos)]
                   | otherwise ->
