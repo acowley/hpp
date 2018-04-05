@@ -50,6 +50,8 @@ class (IsString s, Monoid s) => Stringy s where
   readLines :: FilePath -> IO [s]
   putStringy :: Handle -> s -> IO ()
   toChars :: s -> [Char]
+  slength :: s -> Int
+  sreplicate :: Int -> Char -> s
   -- | An opportunity to copy a string to its own storage to help with GC
   copy :: s -> s
 
@@ -95,6 +97,8 @@ instance Stringy String where
   readLines = fmap lines . readFile
   putStringy = hPutStr
   toChars = id
+  slength = length
+  sreplicate = replicate
   copy = id
 
 instance Stringy B.ByteString where
@@ -182,6 +186,8 @@ instance Stringy B.ByteString where
   {-# INLINE readLines #-}
   putStringy = B.hPutStr
   toChars = B.unpack
+  slength = B.length
+  sreplicate = B.replicate
   copy = B.copy
 
 boolJust :: Bool -> Maybe ()

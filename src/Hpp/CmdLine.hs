@@ -107,11 +107,15 @@ runWithArgs args =
                                     flip openFile WriteMode
                                return ( \os -> mapM_ (putStringy h) os
                                       , hClose h )
+     let linePrag = "#line 1 \"" ++ fileName ++ "\""
+         refinedInput lns
+           | null lns  = linePrag : lns
+           | otherwise = linePrag : lns ++ [linePrag]
      result <- readLines fileName
            >>= runExceptT
                . streamHpp (initHppState cfg' env) snk
                . preprocess
-               . (map fromString lns ++)
+               . (map fromString . refinedInput)
      closeSnk
      case result of
        Left error -> return $ Just error

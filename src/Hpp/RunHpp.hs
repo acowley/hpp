@@ -3,16 +3,16 @@
 -- | Mid-level interface to the pre-processor.
 module Hpp.RunHpp (parseDefinition, preprocess, runHpp, expandHpp,
                    hppIOSink, HppCaps, hppIO, HppResult(..)) where
-import Control.Arrow (first)
+import Control.Arrow (first, second)
 import Control.Exception (throwIO)
-import Control.Monad (unless, (>=>))
+import Control.Monad (unless, (>=>), when)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Except
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Trans.State.Strict (StateT, evalStateT, State)
 import Data.Char (isSpace)
 import Data.IORef
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isJust, fromJust)
 import Data.Monoid ((<>))
 import Data.String (fromString)
 import Hpp.Config (Config, curFileNameF, curFileName, includePaths,
@@ -68,12 +68,13 @@ trigraphReplacement s = aux (breakOn [("??", ())] s)
 -- | If a line ends with a backslash, it is prepended to the following
 -- the line.
 lineSplicing :: Stringy s => [s] -> [s]
-lineSplicing = go id
-  where go acc [] = [acc mempty]
-        go acc (ln:lns) = case unsnoc ln of
-                            Nothing -> acc mempty : go id lns
-                            Just (ini, '\\') -> go (acc . (ini<>)) lns
-                            Just _ -> acc ln : go id lns
+lineSplicing = id
+-- lineSplicing = go id
+--   where go acc [] = [acc mempty]
+--         go acc (ln:lns) = case unsnoc ln of
+--                             Nothing -> acc mempty : go id lns
+--                             Just (ini, '\\') -> go (acc . (ini<>)) lns
+--                             Just _ -> acc ln : go id lns
 {-# INLINE lineSplicing #-}
 
 -- * C Comments
@@ -83,17 +84,18 @@ breakBlockCommentStart s =
   case breakCharOrSub '"' "/*" s of
     NoMatch -> Nothing
     CharMatch pre pos -> let (lit, rest) = skipLiteral pos
-                         in first ((pre <> lit) <>) <$>
+                         in first ((snoc pre '"' <> lit) <>) <$>
                             breakBlockCommentStart rest
     SubMatch pre pos -> Just (pre, pos)
 
-breakBlockCommentEnd :: Stringy s => s -> Maybe s
+breakBlockCommentEnd :: Stringy s => s -> Maybe (s, s)
 breakBlockCommentEnd s =
   case breakCharOrSub '"' "*/" s of
     NoMatch -> Nothing
-    CharMatch _ pos -> let (_, rest) = skipLiteral pos
-                       in breakBlockCommentEnd rest
-    SubMatch _ pos -> Just pos
+    CharMatch pre pos -> let (lit, rest) = skipLiteral pos
+                         in first ((snoc pre '"' <> lit) <>) <$>
+                            breakBlockCommentEnd rest
+    SubMatch pre pos -> Just (pre, pos)
 
 dropOneLineBlockComments :: Stringy s => s -> s
 dropOneLineBlockComments s =
@@ -105,28 +107,26 @@ dropOneLineBlockComments s =
     SubMatch pre pos ->
       case breakOn [("*/", ())] pos of
         Nothing -> pre <> "/*"
-        Just (_,_,pos') -> snoc pre ' ' <> dropOneLineBlockComments pos'
+        Just (_,pre',pos') -> pre <> sreplicate (slength pre' + 2) ' '
+                           <> dropOneLineBlockComments pos'
 
-removeMultilineComments :: Stringy s => Int -> [s] -> [s]
-removeMultilineComments !lineStart = goStart lineStart
-  where goStart _ [] = []
-        goStart !curLine (ln:lns) =
+removeMultilineComments :: Stringy s => [s] -> [s]
+removeMultilineComments = goStart
+  where goStart [] = []
+        goStart (ln:lns) =
           case breakBlockCommentStart ln of
-            Nothing -> ln : goStart (curLine+1) lns
-            Just (pre,_) -> goEnd (curLine+1) pre lns
-        goEnd _ _ [] = error "Unmatched /*"
-        goEnd !curLine pre (ln:lns) =
+            Nothing -> ln : goStart lns
+            Just (pre,_) -> pre : goEnd lns
+        goEnd [] = error "Unmatched /*"
+        goEnd (ln:lns) =
           case breakBlockCommentEnd ln of
-            Nothing -> goEnd (curLine+1) pre lns
-            Just pos
-              | sall isSpace (pre<>pos) ->
-                ("#line "<> fromString (show (curLine+1))) : goStart (curLine + 1) lns
-              | otherwise -> (pre<>pos)
-                             : ("#line "<> fromString (show (curLine+1)))
-                             : goStart (curLine+1) lns
+            Nothing -> "" : goEnd lns
+            Just (pre, pos)
+              | sall isSpace (pre <> pos) -> "" : goStart lns
+              | otherwise -> (sreplicate (slength pre + 2) ' ' <> pos) : goStart lns
 
 commentRemoval :: Stringy s => [s] -> [s]
-commentRemoval = removeMultilineComments 1 . map dropOneLineBlockComments
+commentRemoval = removeMultilineComments . map dropOneLineBlockComments
 
 -- * TOKEN Splices
 
@@ -203,19 +203,20 @@ modifyState f = getState >>= setState . f
 streamNewFile :: (Monad m, HasHppState m)
               => FilePath -> [[TOKEN]] -> Parser m [TOKEN] ()
 streamNewFile fp s =
-  do (oldCfg,oldLine,oldFile) <- do
+  do (oldCfg,oldLine,oldFile,oldDir) <- do
        st <- getState
        let cfg = hppConfig st
            file = curFileName cfg
+           dir = hppCurDir st
            cfg' = cfg { curFileNameF = pure fp }
            ln = hppLineNum st
            -- NOTE: We should *NOT* use a the config lens here
            --       because it will mutate the directory which
            --       we *don't* want in this instance.
        setState (st {hppConfig = cfg', hppLineNum = 1})
-       return (cfg, ln, file)
+       return (cfg, ln, file, dir)
      insertInputSegment
-       ([yieldLineNumFile 1 (Just fp)]
+       ([yieldLineNumFile 1 (Just (oldDir </> fp))]
         ++ s ++ [yieldLineNumFile oldLine (Just oldFile)])
        (modifyState (setL lineNum oldLine . setL config oldCfg))
 
@@ -346,23 +347,56 @@ parseDefinition toks =
 -- | Returns everything up to the next newline. The newline character
 -- itself is consumed.
 takeLine :: (Monad m, HasError m, HasHppState m) => Parser m [TOKEN] [TOKEN]
-takeLine = (onElements $ do
-              ln <- takingWhile (not . newLine)
-              eat <- awaitJust "takeLine" -- Eat the newline character
-              case eat of
-                Other "\n" -> return ()
-                wat -> error $ "Expected newline: "++show wat++" after "++show ln
-              return ln)
-           <* (lineNum %= (+1))
+takeLine = takeLineWithoutIncrement <* (lineNum %= (+1))
+
+takeLineWithoutIncrement :: (Monad m, HasError m, HasHppState m) => Parser m [TOKEN] [TOKEN]
+takeLineWithoutIncrement = onElements $ do
+  ln <- takingWhile (not . newLine)
+  eat <- awaitJust "takeLine" -- Eat the newline character
+  case eat of
+    Other "\n" -> return ()
+    wat -> error $ "Expected newline: "++show wat++" after "++show ln
+  return ln
+
+-- | Returns everything up to the next newline taking into account backslashes.
+-- The newline character itself is consumed.
+takeLineWithBreaks :: (Monad m, HasError m, HasHppState m) => Parser m [TOKEN] (Int, [TOKEN])
+takeLineWithBreaks = onElements (go 1 [])
+  where go !n prev = do
+          ln  <- takingWhile (not . newLine)
+          eat <- awaitJust "takeLine" -- Eat the newline character
+          case eat of
+            Other "\n" -> return ()
+            wat -> error $ "Expected newline: " ++ show wat ++ " after " ++ show ln
+          -- TODO: We should ideally strip off all trailing unimportant tokens
+          --       to take care of the space between the backslash and newline.
+          case last ln of
+            Important "\\" -> go (n + 1) (prev ++ init ln)
+            _ -> return (n, prev ++ ln)
 
 dropLine :: (Monad m, HasError m, HasHppState m) => Parser m [TOKEN] ()
-dropLine = do onElements $ do
-                droppingWhile (not . newLine)
-                eat <- awaitJust "dropLine" -- Eat the newline character
-                case eat of
-                  Other "\n" -> return ()
-                  wat -> error $ "Expected dropped newline: "++show wat
-              lineNum %= (+1)
+dropLine = do
+  dropLineWithoutIncrement
+  lineNum %= (+1)
+
+dropLineWithoutIncrement :: (Monad m, HasError m, HasHppState m) => Parser m [TOKEN] ()
+dropLineWithoutIncrement =
+  onElements $ do
+    droppingWhile (not . newLine)
+    eat <- awaitJust "dropLine" -- Eat the newline character
+    case eat of
+      Other "\n" -> return ()
+      wat -> error $ "Expected dropped newline: "++show wat
+
+dropLineAndReplace :: (Monad m, HasError m, HasHppState m) => Parser m [TOKEN] ()
+dropLineAndReplace = do
+  onElements $ do
+    droppingWhile (not . newLine)
+    eat <- awaitJust "dropLine" -- Eat the newline character
+    case eat of
+      Other "\n" -> return ()
+      wat -> error $ "Expected dropped newline: "++show wat
+  replace [Other "\n"]
 
 -- * State Zooming
 
@@ -392,12 +426,16 @@ directive :: forall m. (Monad m, HppCaps m)
 directive = lift (onElements (awaitJust "directive")) >>= aux
   where aux :: TOKEN -> HppT [String] (Parser m [TOKEN]) Bool
         aux (Important cmd) = case cmd of
-          "pragma" -> True <$ lift dropLine -- Ignored
-          "define" -> True <$
-                      (lift $ fmap parseDefinition takeLine >>= \case
-                        Nothing -> use lineNum >>=
-                                   throwError . BadMacroDefinition
-                        Just def -> env %= insertPair def)
+          "pragma" -> True <$ lift (do (n, _) <- takeLineWithBreaks
+                                       precede (replicate n [Other "\n"]))
+          "define" -> lift $ do
+            (n, line) <- takeLineWithBreaks
+            case parseDefinition line of
+              Nothing  -> use lineNum >>= throwError . BadMacroDefinition
+              Just def -> do
+                precede (replicate n [Other "\n"])
+                env %= insertPair def
+            return True
           "undef" -> do name <- lift . onElements $ do
                           droppingWhile (not . isImportant)
                           Important name <- awaitJust "undef"
@@ -420,49 +458,56 @@ directive = lift (onElements (awaitJust "directive")) >>= aux
                                         . dropWhile (not . isImportant)
                                         $ optFile
                                  config %= (\cfg -> cfg { curFileNameF = pure fn })
-                               lineNum .= ln'
+                               lineNum .= ln' - 1
+                               -- HACK: Need to find a better way to handle this.
+                               lift (replace (Important ("#" <> cmd) : Other " "
+                                              : toks ++ [Other "\n"]))
                                return True
                          _ -> use lineNum >>=
                               throwError
                               . flip BadLineArgument (toChars (detokenize toks))
           "ifdef" ->
-            do toks <- lift (onElements droppingSpaces >> takeLine)
+            do (n, toks) <- lift (onElements droppingSpaces >> takeLineWithBreaks)
                ln <- use lineNum
                case takeWhile isImportant toks of
                  [Important t] ->
                    lookupMacro t >>= \case
                      Nothing ->
-                       lift (dropBranchLine ln >>= replace . fst)
+                       lift dropBranchLineAndReplace
                      Just _ ->
-                       lift (onInputSegment (takeBranchFun ln)) -- (takeBranch ln >>= precede)
+                       lift (onInputSegment takeBranchFun) -- (takeBranch ln >>= precede)
                  _ -> throwError . UnknownCommand ln $
                       "ifdef "++ toChars (detokenize toks)
+               lift (precede (replicate n [Other "\n"]))
                return True
           "ifndef" ->
-            do toks <- lift (onElements droppingSpaces >> takeLine)
+            do (n, toks) <- lift (onElements droppingSpaces >> takeLineWithBreaks)
                ln <- use lineNum
                case takeWhile isImportant toks of
                  [Important t] ->
                    lookupMacro t >>= \case
-                      Nothing -> lift (onInputSegment (takeBranchFun ln)) -- takeBranch ln >>= precede)
-                      Just _ -> lift (dropBranchLine ln >>= replace . fst)
+                      Nothing -> lift (onInputSegment takeBranchFun) -- takeBranch ln >>= precede)
+                      Just _ -> lift dropBranchLineAndReplace
                  _ -> throwError . UnknownCommand ln $
                       "ifndef "++ toChars (detokenize toks)
+               lift (precede (replicate n [Other "\n"]))
                return True
-          "else" -> True <$ lift dropLine
+          "else" -> True <$ lift dropLineWithoutIncrement
           "if" -> True <$ ifAux
           "elif" -> True <$ ifAux
-          "endif" -> True <$ lift dropLine
-          "error" -> do toks <- lift (onElements droppingSpaces >> takeLine)
-                        ln <- subtract 1 <$> use lineNum
+          "endif" -> True <$ lift dropLineAndReplace
+          "error" -> do toks <- lift (onElements droppingSpaces
+                                   >> takeLineWithoutIncrement)
+                        ln   <-  use lineNum
                         curFile <- curFileName <$> use config
                         let tokStr = toChars (detokenize toks)
                         throwError $ UserError ln (tokStr++" ("++curFile++")")
           "warning" -> True <$ lift dropLine -- warnings not yet supported
-          t -> do toks <- lift takeLine
-                  ln <- subtract 1 <$> use lineNum
-                  throwError $ UnknownCommand ln
-                    (toChars (detokenize (Important t:toks)))
+          _ -> return False
+          -- t -> do toks <- lift takeLineWithoutIncrement
+          --         ln   <- use lineNum
+          --         throwError $ UnknownCommand ln
+          --           (toChars (detokenize (Important t:toks)))
         aux _ = error "Impossible unimportant directive"
         includeAux :: (LineNum -> FilePath -> HppT src (Parser m [TOKEN]) [String])
                    -> HppT src (Parser m [TOKEN]) ()
@@ -471,21 +516,24 @@ directive = lift (onElements (awaitJust "directive")) >>= aux
                                <$> expandLineP)
              ln <- use lineNum
              src <- prepareInput <*> readFun ln fileName
+             lineNum %= (+ 1)
              lift (streamNewFile (unquote fileName) src)
         {- SPECIALIZE includeAux ::
             (LineNum -> FilePath -> HppT [String] (Parser (StateT HppState (ExceptT Error IO)) [TOKEN]) [String])
             -> HppT [String] (Parser (StateT HppState (ExceptT Error IO)) [TOKEN]) () #-}
         ifAux =
-          do toks <- lift (onElements droppingSpaces >> takeLine)
+          do (n, toks) <- lift (onElements droppingSpaces >> takeLineWithBreaks)
              e <- use env
-             ln <- use lineNum
-             lineNum .= ln - 1 -- takeLine incremented the line count
              ex <- lift (lift (evalParse expandLineP [squashDefines e toks]))
              let res = evalExpr <$> parseExpr (map (fmap toChars) ex)
-             lineNum .= ln
              if maybe False (/= 0) res
-               then lift (onInputSegment (takeBranchFun ln)) -- (takeBranch ln >>= precede)
-               else lift (dropBranchLine ln >>= replace . fst)
+               then lift (onInputSegment takeBranchFun) -- (takeBranch ln >>= precede)
+               else lift dropBranchLineAndReplace
+             lift (precede (replicate n [Other "\n"]))
+        dropBranchLineAndReplace = do
+          (mln, skipped) <- dropBranch
+          when (isJust mln) $ replace (fromJust mln)
+          precede $ replicate skipped [Other "\n"]
 
 {-# SPECIALIZE directive ::
     HppT [String] (Parser (StateT HppState (ExceptT Error IO)) [TOKEN]) Bool #-}
@@ -496,6 +544,14 @@ directive = lift (onElements (awaitJust "directive")) >>= aux
 -- a predicate on the evaluation environment.
 squashDefines :: Env -> [TOKEN] -> [TOKEN]
 squashDefines _ [] = []
+squashDefines env' (Important "!" : Important "defined" : ts) = go ts
+  where go (t@(Other _) : ts') = t : go ts'
+        go (t@(Important "(") : ts') = t : go ts'
+        go (Important t : ts') =
+          case lookupKey t env' of
+            Just _  -> Important "0" : squashDefines env' ts'
+            Nothing -> Important "1" : squashDefines env' ts'
+        go [] = []
 squashDefines env' (Important "defined" : ts) = go ts
   where go (t@(Other _) : ts') = t : go ts'
         go (t@(Important "(") : ts') = t : go ts'
@@ -535,35 +591,30 @@ dropBranchFun = go (1::Int) 0
 
 -- | Take everything up to the end of this branch, drop all remaining
 -- branches (if any).
-takeBranchFun :: LineNum -> [[TOKEN]] -> [[TOKEN]]
+takeBranchFun :: [[TOKEN]] -> [[TOKEN]]
 takeBranchFun = go (1::Int)
-  where go _ _ [] = [] -- error: unterminated conditional
-        go 0 !n lns = yieldLineNum n : lns
-        go !nesting !n (ln:lns) =
+  where go _ [] = [] -- error: unterminated conditional
+        go 0 lns = lns
+        go !nesting (ln:lns) =
           case getCmd ln of
             Just cmd
               | cmd `elem` ["if","ifdef","ifndef"] ->
-                ln : go (nesting+1) (n+1) lns
-              | cmd == "endif" -> ln : go (nesting - 1) (n + 1) lns
+                ln : go (nesting+1) lns
+              | cmd == "endif" -> ln : go (nesting - 1) lns
               | nesting == 1 && cmd `elem` ["else","elif"] ->
                 let (numSkipped, lns') = dropBranchFun lns
-                in go 1 (n+1+numSkipped) lns'
-            _ -> ln : go nesting (n+1) lns
-
+                in go 1 (replicate (1 + numSkipped) [Other "\n"] ++ lns')
+            _ -> ln : go nesting lns
 
 yieldLineNum :: LineNum -> [TOKEN]
 yieldLineNum !ln = yieldLineNumFile ln Nothing
 
 yieldLineNumFile :: LineNum -> Maybe FilePath -> [TOKEN]
 yieldLineNumFile !ln !fp =
-  [Important ("#line " <> fromString (show ln) <> maybeFile), Other "\n"]
-  where maybeFile = maybe mempty (\f -> " \"" <> fromString f <> "\"") fp
-
-dropBranchLine :: (HasError m, Monad m)
-               => LineNum -> Parser m [TOKEN] ([TOKEN], LineNum)
-dropBranchLine !ln = do (el, numSkipped) <- dropBranch
-                        let ln' = ln + numSkipped
-                        return (yieldLineNum ln' ++ fromMaybe [] el, ln')
+  [Important "#", Important "line", Other " ", Important (fromString (show ln))] ++
+  maybeFile ++ [Other "\n"]
+  where maybeFile = maybe mempty (\f -> [Other " ",
+                                         Important ("\"" <> fromString f <> "\"")]) fp
 
 -- | Skip to the end of a conditional branch. Returns the 'Just' the
 -- token that ends this branch if it is an @else@ or @elif@, or
@@ -618,7 +669,7 @@ normalCPP :: [String] -> [[TOKEN]]
 normalCPP = map ((++ [Other "\n"]) . tokenize)
           . lineSplicing
           -- . map dropLineComments
-          . removeMultilineComments 1
+          . removeMultilineComments
           . map (dropOneLineBlockComments . trigraphReplacement)
 {-# INLINABLE normalCPP #-}
 
@@ -656,7 +707,9 @@ preprocess :: (Monad m, HppCaps m)
 preprocess src =
   do cfg <- getL config <$> getState
      prep <- prepareInput
-     let prepOutput = if inhibitLinemarkers cfg then aux (curFileName cfg) else pure
+     let prepOutput = pure
+           -- if inhibitLinemarkers cfg then aux (curFileName cfg) else pure
+           -- if inhibitLinemarkers cfg then aux (curFileName cfg) else pure
          addStartLinePrag tokens = yieldLineNumFile 1 (pure (curFileName cfg)) : tokens
      lift (precede (addStartLinePrag (prep src)))
      parseStreamHpp (fmap (prepOutput . detokenize) <$> macroExpansion)
