@@ -492,7 +492,7 @@ directive = lift (onElements (awaitJust "directive")) >>= aux
                       "ifndef "++ toChars (detokenize toks)
                lift (precede (replicate n [Other "\n"]))
                return True
-          "else" -> True <$ lift dropLineWithoutIncrement
+          "else" -> True <$ lift dropLineAndReplace
           "if" -> True <$ ifAux
           "elif" -> True <$ ifAux
           "endif" -> True <$ lift dropLineAndReplace
@@ -631,7 +631,7 @@ dropBranch = go (1::Int) 0
                  | cmd `elem` ["if","ifdef","ifndef"] ->
                    go (nesting+1) (n+1)
                  | cmd `elem` ["else", "elif"] -> if nesting == 1
-                                                  then return (Just ln, n+1)
+                                                  then return (Just ln, n)
                                                   else go nesting (n+1)
                _ -> go nesting (n+1)
 
@@ -710,8 +710,7 @@ preprocess src =
      let prepOutput = pure
            -- if inhibitLinemarkers cfg then aux (curFileName cfg) else pure
            -- if inhibitLinemarkers cfg then aux (curFileName cfg) else pure
-         addStartLinePrag tokens = yieldLineNumFile 1 (pure (curFileName cfg)) : tokens
-     lift (precede (addStartLinePrag (prep src)))
+     lift (precede (prep src))
      parseStreamHpp (fmap (prepOutput . detokenize) <$> macroExpansion)
   where aux f xs | sIsPrefixOf "#line" xs && not (sIsInfixOf (fromString f) xs) = []
                  | otherwise = [xs]

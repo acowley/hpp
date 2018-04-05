@@ -108,14 +108,14 @@ runWithArgs args =
                                return ( \os -> mapM_ (putStringy h) os
                                       , hClose h )
      let linePrag = "#line 1 \"" ++ fileName ++ "\""
-         refinedInput lns
+         lns'
            | null lns  = linePrag : lns
            | otherwise = linePrag : lns ++ [linePrag]
      result <- readLines fileName
            >>= runExceptT
                . streamHpp (initHppState cfg' env) snk
                . preprocess
-               . (map fromString . refinedInput)
+               . (map fromString lns' ++)
      closeSnk
      case result of
        Left error -> return $ Just error
