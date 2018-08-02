@@ -11,7 +11,7 @@ import Data.ByteString.Char8 (ByteString)
 import Data.Functor.Constant
 import Data.Functor.Identity
 -- import qualified Data.Map as M
-import qualified Data.Trie as T
+import Data.HashMap.Strict (HashMap)
 import Hpp.Config
 import Hpp.Env (emptyEnv, lookupKey)
 import Hpp.StringSig (toChars)
@@ -24,7 +24,7 @@ import System.FilePath (takeDirectory)
 type LineNum = Int
 
 -- | A macro binding environment.
-type Env = T.Trie Macro
+type Env = HashMap ByteString Macro
 
 -- * Changing the underlying string type
 type String = ByteString

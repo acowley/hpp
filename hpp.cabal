@@ -32,7 +32,8 @@ library
                        Hpp.Tokens,
                        Hpp.Types
   build-depends:       base >=4.8 && <4.12, directory, time >=1.5, filepath,
-                       transformers >=0.4, bytestring, bytestring-trie, ghc-prim
+                       transformers >=0.4, bytestring, unordered-containers,
+                       ghc-prim
 
   if impl(ghc < 8)
     build-depends: semigroups >= 0.18 && < 0.19
