@@ -1,4 +1,4 @@
-{ compiler ? "ghc822"
+{ compiler ? "ghc843"
 , withHoogle ? true
 }:
 
@@ -13,7 +13,7 @@ let
       ghc = super.ghc // { withPackages = f: super.ghc.withHoogle (ps: f ps ++ [ps.intero ps.
 cabal-install]); };
           intero = pkgs.haskell.lib.dontCheck (super.callPackage ~/src/intero {});
-          ListLike = pkgs.haskell.lib.addBuildDepend super.ListLike super.semigroups;
+          # ListLike = pkgs.haskell.lib.addBuildDepend super.ListLike super.semigroups;
           ghcWithPackages = self.ghc.withPackages;
         });
       }
