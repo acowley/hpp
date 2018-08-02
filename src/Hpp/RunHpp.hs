@@ -248,7 +248,7 @@ data HppResult a = HppResult { hppFilesRead :: [FilePath]
 -- | Interpret the IO components of the preprocessor. This
 -- implementation relies on IO for the purpose of checking search
 -- paths for included files.
-runHpp :: forall m a src. (MonadIO m)
+runHpp :: forall m a src. (MonadIO m, HasHppState m)
        => Config
        -> (FilePath -> m src)
        -> (src -> m ())
