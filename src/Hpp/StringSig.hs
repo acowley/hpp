@@ -1,5 +1,7 @@
 {-# LANGUAGE BangPatterns, CPP, FlexibleInstances, OverloadedStrings,
              PatternSynonyms, TypeSynonymInstances, ViewPatterns #-}
+-- | Defines a signature, 'Stringy', for string-like types that we may
+-- want to use.
 module Hpp.StringSig where
 import Data.Char
 import qualified Data.List as L

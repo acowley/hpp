@@ -259,20 +259,21 @@ emptyHppState :: Config -> HppState
 emptyHppState cfg = HppState cfg (takeDirectory (curFileName cfg)) 1 emptyEnv
 
 config :: Lens HppState Config
-config f (HppState cfg dir ln e) =
+config f (HppState cfg _dir ln e) =
   (\cfg' -> HppState cfg' (takeDirectory (curFileName cfg')) ln e) <$> f cfg
 {-# INLINE config #-}
 
 dir :: Lens HppState FilePath
-dir f (HppState cfg dir ln e) = (\dir' -> HppState cfg dir' ln e) <$> f dir
+dir f (HppState cfg dirOld ln e) =
+  (\dirNew -> HppState cfg dirNew ln e) <$> f dirOld
 {-# INLINE dir #-}
 
 lineNum :: Lens HppState LineNum
-lineNum f (HppState cfg dir ln e) = (\ln' -> HppState cfg dir ln' e) <$> f ln
+lineNum f (HppState cfg dir0 ln e) = (\ln' -> HppState cfg dir0 ln' e) <$> f ln
 {-# INLINE lineNum #-}
 
 env :: Lens HppState Env
-env f (HppState cfg dir ln e) = (\e' -> HppState cfg dir ln e') <$> f e
+env f (HppState cfg dir0 ln e) = (\e' -> HppState cfg dir0 ln e') <$> f e
 {-# INLINE env #-}
 
 use :: (HasHppState m, Functor m) => Lens HppState a -> m a

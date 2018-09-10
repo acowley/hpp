@@ -2,7 +2,7 @@
 -- | A front-end to run Hpp with textual arguments as from a command
 -- line invocation.
 module Hpp.CmdLine (runWithArgs) where
-import Control.Monad (unless, (>=>))
+import Control.Monad (unless)
 import Control.Monad.Trans.Except (runExceptT)
 import Data.String (fromString)
 import Hpp
@@ -115,5 +115,5 @@ runWithArgs args =
                . (map fromString lns ++)
      closeSnk
      case result of
-       Left error -> return $ Just error
+       Left err -> return $ Just err
        _ -> return Nothing

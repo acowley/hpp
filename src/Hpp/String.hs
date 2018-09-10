@@ -1,6 +1,13 @@
 {-# LANGUAGE BangPatterns #-}
 -- | HELPERS for working with 'String's
-module Hpp.String (stringify, unquote, stripAngleBrackets, trimSpaces, breakOn, cons)
+module Hpp.String (
+  stringify
+  , unquote
+  , stripAngleBrackets
+  , trimSpaces
+  , breakOn
+  , cons
+  )
   where
 import Data.Char (isSpace)
 import Data.List (isPrefixOf, find)

@@ -30,7 +30,7 @@ import Hpp.Tokens (Token(..), importants, isImportant, newLine, trimUnimportant,
                    detokenize, notImportant, tokenize, skipLiteral)
 import Hpp.Types
 import System.Directory (doesFileExist)
-import System.FilePath ((</>), takeDirectory)
+import System.FilePath ((</>))
 import Text.Read (readMaybe)
 import Prelude hiding (String)
 import qualified Prelude as P
