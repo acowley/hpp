@@ -136,6 +136,9 @@ tokWords s =
 {-# INLINABLE tokWords #-}
 
 data LitStringChar = DBackSlash | EscapedDQuote | DQuote
+
+-- | Skip over a string or character literal returning the literal and
+-- the remaining the input.
 skipLiteral :: Stringy s => s -> (s,s)
 skipLiteral s =
   case breakOn [("\\\\", DBackSlash), ("\\\"", EscapedDQuote), ("\"", DQuote)] s of

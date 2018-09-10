@@ -18,6 +18,7 @@ import Data.IORef
 import Data.Maybe (fromMaybe)
 import qualified Hpp.Config as C
 import qualified Hpp.Env as E
+import qualified Hpp.Macro as M
 import qualified Hpp.RunHpp as R
 import qualified Hpp.Types as T
 import Hpp.Types (setL, config, env, lineNum)
@@ -128,4 +129,4 @@ addDefinition name val s = flip (T.over T.env) s . E.insertPair
 -- with 'E.insertPair' for manual construction of a 'T.Env' binding
 -- environment.
 parseDefinition :: ByteString -> ByteString -> Maybe (ByteString, T.Macro)
-parseDefinition name val = R.parseDefinition (tokenize name ++ tokenize val)
+parseDefinition name val = M.parseDefinition (tokenize name ++ tokenize val)

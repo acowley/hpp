@@ -20,3 +20,4 @@ tests/mcpp-2.7.2
 /Setup
 *.hi
 *.o
+*~

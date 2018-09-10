@@ -108,14 +108,29 @@ instance Functor (HppF t) where
   fmap f (WriteOutput o k) = WriteOutput o (f k)
   {-# INLINE fmap #-}
 
+-- | 'Hpp' is a monad with 'HppF' as its base functor.
+type Hpp t = FreeF (HppF t)
+
 -- * Hpp Monad Transformer
 
 -- | A free monad transformer specialized to HppF as the base functor.
-newtype HppT t m a = HppT { runHppT :: m (FreeF (HppF t) a (HppT t m a)) }
+newtype HppT t m a = HppT { runHppT :: m (Hpp t a (HppT t m a)) }
 
-writeOutput :: Monad m => t -> HppT t m ()
-writeOutput = HppT . return . FreeF . flip WriteOutput (return ())
-{-# INLINE writeOutput #-}
+-- | @hppReadFile lineNumber fileName@ introduces an @#include
+-- <fileName>@ at the given line number.
+hppReadFile :: Monad m => Int -> FilePath -> HppT src m src
+hppReadFile n file = HppT (pure (FreeF (ReadFile n file return)))
+{-# INLINE hppReadFile #-}
+
+-- | @hppReadNext lineNumber fileName@ introduces an @#include_next
+-- <fileName>@ at the given line number.
+hppReadNext :: Monad m => Int -> FilePath -> HppT src m src
+hppReadNext n file = HppT (pure (FreeF (ReadNext n file return)))
+{-# INLINE hppReadNext #-}
+
+hppWriteOutput :: Monad m => t -> HppT t m ()
+hppWriteOutput = HppT . return . FreeF . flip WriteOutput (return ())
+{-# INLINE hppWriteOutput #-}
 
 instance Functor m => Functor (HppT t m) where
   fmap f (HppT x) = HppT $ fmap f' x

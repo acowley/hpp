@@ -2,7 +2,7 @@
 -- | Line expansion is the core input token processing
 -- logic. Object-like macros are substituted, and function-like macro
 -- applications are expanded.
-module Hpp.Expansion (expandLine) where
+module Hpp.Expansion (expandLineState) where
 import Control.Monad.Trans.Class (lift)
 import Data.Bool (bool)
 import Data.Foldable (foldl', traverse_)
@@ -17,7 +17,7 @@ import Hpp.Parser (Parser, ParserT, precede, replace, await, onIsomorphism,
                    onElements, droppingWhile, awaitJust, evalParse)
 import Hpp.StringSig (stringify, uncons, isEmpty, toChars)
 import Hpp.Tokens (Token(..), notImportant, isImportant, detokenize)
-import Hpp.Types (HasError(..), HasEnv(..), Scan(..), Error(..), Macro(..),
+import Hpp.Types (hppConfig, hppLineNum, getState, HasHppState, HasError(..), HasEnv(..), Scan(..), Error(..), Macro(..),
                   TOKEN, String, lookupMacro)
 import Prelude hiding (String)
 
@@ -32,6 +32,15 @@ isSpaceScan = maybe False notImportant . unscan
 
 isImportantScan :: Scan -> Bool
 isImportantScan = maybe False isImportant . unscan
+
+expandLineState :: (Monad m, HasHppState m, HasEnv m, HasError m)
+                => Parser m [TOKEN] [TOKEN]
+expandLineState =
+  do st <- getState
+     let ln = hppLineNum st
+         cfg = hppConfig st
+     expandLine cfg ln
+
 
 -- | Expand all macros to the end of the current line or until all
 -- in-progress macro invocations are complete, whichever comes last.
