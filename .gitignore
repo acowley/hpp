@@ -16,6 +16,7 @@ tests/mcpp-2.7.2
 /bench.prof
 /hpp.ps
 /.stack-work
+/dist-newstyle
 /Setup
 *.hi
 *.o
