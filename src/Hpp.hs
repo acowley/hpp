@@ -72,8 +72,7 @@ streamHpp :: MonadIO m
 streamHpp st snk (HppT h) =
   do (a, st') <- S.runStateT
                      (evalParse
-                        (R.runHpp (T.hppConfig st)
-                                  (liftIO . readLines)
+                        (R.runHpp (liftIO . readLines)
                                   (lift . lift . lift . snk)
                                   h)
                         [])

@@ -254,12 +254,11 @@ data HppResult a = HppResult { hppFilesRead :: [FilePath]
 -- implementation relies on IO for the purpose of checking search
 -- paths for included files.
 runHpp :: forall m a src. (MonadIO m, HasHppState m)
-       => Config
-       -> (FilePath -> m src)
+       => (FilePath -> m src)
        -> (src -> m ())
        -> HppT src m a
        -> m (Either (FilePath,Error) (HppResult a))
-runHpp cfg source sink m = runHppT m >>= go []
+runHpp source sink m = runHppT m >>= go []
   where go :: [FilePath]
            -> FreeF (HppF src) a (HppT src m a)
            -> m (Either (FilePath, Error) (HppResult a))
@@ -285,8 +284,7 @@ runHpp cfg source sink m = runHppT m >>= go []
         readAux files _ln _file k (Just file') =
           source file' >>= runHppT . k >>= go files
 {-# SPECIALIZE runHpp ::
-    Config
- -> (FilePath -> Parser (StateT HppState (ExceptT Error IO)) [TOKEN] [String])
+    (FilePath -> Parser (StateT HppState (ExceptT Error IO)) [TOKEN] [String])
  -> ([String] -> Parser (StateT HppState (ExceptT Error IO)) [TOKEN] ())
  -> HppT [String] (Parser (StateT HppState (ExceptT Error IO)) [TOKEN]) a
  -> Parser (StateT HppState (ExceptT Error IO)) [TOKEN] (Either (FilePath,Error) (HppResult a)) #-}
@@ -686,7 +684,7 @@ hppIOSink' :: Config -> Env -> ([String] -> IO ()) -> [String]
 hppIOSink' cfg env' snk src =
   fmap (fmap hppFilesRead)
   . dischargeHppCaps cfg env' $
-  runHpp cfg (liftIO . readLines) (liftIO . snk) (preprocess src)
+  runHpp (liftIO . readLines) (liftIO . snk) (preprocess src)
 
 -- | General hpp runner against input source file lines. Output lines
 -- are fed to the caller-supplied sink function. Any errors
