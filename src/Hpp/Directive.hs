@@ -75,7 +75,9 @@ directive = lift (onElements (awaitJust "directive")) >>= aux
                         Just def -> env %= insertPair def)
           "undef" -> do name <- lift . onElements $ do
                           droppingWhile (not . isImportant)
-                          Important name <- awaitJust "undef"
+                          name <- awaitJust "undef" >>= \case
+                                    Important n -> return n
+                                    _ -> error "undef directive got Other token"
                           return name
                         lift dropLine
                         env %= deleteKey name
