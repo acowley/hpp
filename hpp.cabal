@@ -48,7 +48,7 @@ library
 
 executable hpp
   main-is:             src/Main.hs
-  build-depends:       hpp, base >=4.8 && <4.12, directory, time >=1.5, filepath
+  build-depends:       hpp, base, directory, time >=1.5, filepath
   hs-source-dirs:      .
   default-language:    Haskell2010
   ghc-options: -Wall
