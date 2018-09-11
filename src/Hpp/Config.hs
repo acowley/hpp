@@ -122,3 +122,28 @@ defaultConfigFNow = do now <- getCurrentTime
                            t = formatPrepTime now
                        return $ defaultConfigF { prepDateF = Just d
                                                , prepTimeF = Just t }
+
+-- * Lens-like accessors for Config
+
+-- | Lens for the "splice long lines" option (prepend a line ending
+-- with a backslash to the next line).
+spliceLongLinesL :: Functor f => (Bool -> f Bool) -> Config -> f Config
+spliceLongLinesL f cfg = (\x -> cfg { spliceLongLinesF = pure x })
+                         <$> f (spliceLongLines cfg)
+
+-- | Lens for the "erase C-style comments" option (comments delimited
+-- by @/*@ and @*/@).
+eraseCCommentsL :: Functor f => (Bool -> f Bool) -> Config -> f Config
+eraseCCommentsL f cfg = (\x -> cfg { eraseCCommentsF = pure x })
+                        <$> f (eraseCComments cfg)
+
+-- | Lens for the "inhibit line markers" option. Option to disable the
+-- emission of #line pragmas in the output.
+inhibitLinemarkersL :: Functor f => (Bool -> f Bool) -> Config -> f Config
+inhibitLinemarkersL f cfg = (\x -> cfg { inhibitLinemarkersF = pure x })
+                            <$> f (inhibitLinemarkers cfg)
+
+-- | Lens for the "replace trigraphs" option.
+replaceTrigraphsL :: Functor f => (Bool -> f Bool) -> Config -> f Config
+replaceTrigraphsL f cfg = (\x -> cfg { replaceTrigraphsF = pure x })
+                          <$> f (replaceTrigraphs cfg)
