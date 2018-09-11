@@ -16,18 +16,18 @@ usage = mapM_ putStrLn
   , "-I dir"
   , "  Add directory dir to the search path for includes."
   , "-o file"
-  , "  Write output to file."
+  , "  Write output to file. If not given, outputs to stdout."
   , "-include file"
   , "  Acts as if #include \"file\" were the first line "
   , "  in the primary source file. -include options are "
   , "  processed after -D and -U options."
-  , "-imacros file"
-  , "  Like -include, except that output is discarded. Only"
-  , "  macro definitions are kept."
   , "--cpp"
   , "  C98 compatibility."
   , "  Implies: --fline-splice --ferase-comments --freplace-trigraphs"
   , "  -D __STDC__  -D __STDC_VERSION__=199409L -D _POSIX_C_SOURCE=200112L"
+  , "--only-macros"
+  , "  No line splicing, no comment removal, no trigraph replacement."
+  , "  Only macros (including conditionals) and line marker output."
   , "-P"
   , "  Inhibit #line markers (when this option is given after --cpp)"
   , "--fline-splice"
@@ -35,11 +35,17 @@ usage = mapM_ putStrLn
   , "--ferase-comments"
   , "  Remove all C-style comments before processing."
   , "--freplace-trigraphs"
-  , "  Replace trigraph sequences before processing." ]
+  , "  Replace trigraph sequences before processing."
+  , "--fline-markers"
+  , "  Enable emission of #line markers in output"]
 
 main :: IO ()
 main = do getArgs >>= \case
             [] -> usage
+            ["--help"] -> usage
+            ["-help"] -> usage
+            ["-h"] -> usage
+            ["--h"] -> usage
             args -> runWithArgs args >> return ()
 
 

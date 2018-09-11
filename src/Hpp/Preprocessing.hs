@@ -130,6 +130,9 @@ prepareInput =
        _ | (eraseCComments cfg && spliceLongLines cfg
             && (not (replaceTrigraphs cfg))) ->
            pure haskellCPP
+       _ | not (any ($ cfg) [ eraseCComments
+                            , spliceLongLines
+                            , replaceTrigraphs ]) -> pure onlyMacrosCPP
        _ | otherwise -> pure (genericConfig cfg)
 
 -- * HPP configurations
@@ -147,6 +150,12 @@ haskellCPP = map ((++[Other "\n"]) . tokenize)
            . lineSplicing
            . cCommentRemoval
 {-# INLINABLE haskellCPP #-}
+
+-- | No C-style comment removal; no line splicing; no trigraph
+-- replacement. This variant only supports macros and conditionals.
+onlyMacrosCPP :: [String] -> [[TOKEN]]
+onlyMacrosCPP = map ((++[Other "\n"]) . tokenize)
+{-# INLINABLE onlyMacrosCPP #-}
 
 -- | If we don't have a predefined processor, we build one based on a
 -- 'Config' value.
