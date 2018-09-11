@@ -1,3 +1,9 @@
+# 0.6.0
+
+- Various bug fixes by @rahulmutt. These may change behavior not captured by the MCPP test suite.
+- Switch to `unordered-containers` from `bytestring-trie` for stackage compatibility
+- Internal refactoring
+
 # 0.5.1
 Added the `expand` API for pure macro processing (i.e. `#include`s are ignored).
 
