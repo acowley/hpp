@@ -1,17 +1,14 @@
-{-# LANGUAGE DeriveFunctor, LambdaCase, Rank2Types,
-             ScopedTypeVariables, TupleSections #-}
+{-# LANGUAGE DeriveFunctor, LambdaCase, TupleSections #-}
 -- | Parsers over streaming input.
-module Hpp.Parser (Parser, ParserT, parse, evalParse, await, awaitJust, replace,
-                   droppingWhile, precede, takingWhile, onChunks, onElements,
-                   onInputSegment, insertInputSegment, onIsomorphism,
-                   runParser) where
-import Control.Arrow (second, (***))
+module Hpp.Parser (Parser, ParserT, evalParse, await, awaitJust, replace,
+                   droppingWhile, precede, takingWhile, onElements,
+                   onInputSegment, insertInputSegment, onIsomorphism) where
+import Control.Arrow ((***))
 import Control.Monad.Trans.State.Strict
 import Hpp.Types (HasError(..), Error(UserError))
 import Control.Monad.Trans.Class (lift)
 import Data.List.NonEmpty (NonEmpty(..))
 import Data.Maybe (mapMaybe)
-import Data.Monoid ((<>))
 
 -- * Parsers
 
@@ -23,27 +20,12 @@ data InputItem m a = Action (m ()) | Value a deriving Functor
 type Input m a = [InputItem m a]
 
 -- | Functions for working with input sources.
-data Source m src i =  Source { srcAwait :: src -> m (Maybe (i, src))
-                              , srcPrecede :: [i] -> src -> src }
-
--- data Source m i where
---   Source :: { srcSrc :: src
---             , srcAwait :: src -> m (Maybe (i, src))
---             , srcPrecede :: [i] -> src -> src } -> Source m i
-
+data Source m src i =  Source { srcSrc :: src
+                              , _srcAwait :: src -> m (Maybe (i, src))
+                              , _srcPrecede :: [i] -> src -> src }
 
 -- | A 'ParserT' is a bit of state that carries a source of input.
-type ParserT m src i = StateT (Source m src i, src) m
-
--- class CanParse i m where
---   getSource :: m (Source m src i)
---   setSource :: src -> m ()
-
--- srcAwait' :: CanParse i m => m (Maybe i)
--- srcAwait' = do s <- getSource
---                x <- srcAwait s (srcSrc src)
---                mapM_ (\(i,src') -> i <$ setSource src')
-
+type ParserT m src i = StateT (Source m src i) m
 
 -- | A 'Parser' is a bit of state that carries a source of input
 -- consisting of a list of values which are either actions in an
@@ -64,34 +46,25 @@ unconsMNonEmpty r = unconsM r >>= \case
   Just ([], rst) -> unconsMNonEmpty rst
   Just (x:xs, rst) -> return (Just (x :| xs, rst))
 
-unconsSource :: Monad m => Source m (Input m [i]) i
-unconsSource = Source aw ropePrecede
+unconsSource :: Monad m => Input m [i] -> Source m (Input m [i]) i
+unconsSource src = Source src aw ropePrecede
   where aw r = unconsMNonEmpty r >>= \case
           Nothing -> return Nothing
           Just (x :| xs, r') -> return (Just (x, Value xs : r'))
 
-flattenSource :: Monad m => Source m (Input m [[i]]) i
-flattenSource = Source aw pr
-  where aw r = unconsMNonEmpty r >>= \case
+flattenSource :: Monad m => Source m (Input m [[i]]) [i] -> Source m (Input m [[i]]) i
+flattenSource (Source src0 aw pr) = Source src0 aw' pr'
+  where aw' src = aw src >>= \case
           Nothing -> return Nothing
-          Just ([] :| ys, r') -> aw (Value ys : r')
-          Just ((x:xs) :| ys, r') -> return (Just (x, Value (xs:ys) : r'))
-        pr xs [] = [Value [xs]]
-        pr xs (Value (ys:zs) : ms) = Value ((xs++ys) : zs) : ms
-        pr xs (Value [] : ms) = Value [xs] : ms
-        pr xs ms@(Action _ : _) = Value [xs] : ms
-
-chunkSource :: (Monoid src, Applicative m) => Source m (Input m src) src
-chunkSource = Source unconsM pr
-  where pr xs [] = [Value (mconcat xs)]
-        pr xs (Value ys : ms) = Value (mconcat xs <> ys) : ms
-        pr xs ms@(Action _ : _) = Value (mconcat xs) : ms
+          Just ([], src') -> aw' src'
+          Just (x:xs, src') -> return (Just (x, pr' xs src'))
+        pr' xs src = pr [xs] src
 
 await :: Monad m => ParserT m src i (Maybe i)
-await = do (hs, st) <- get
-           lift (srcAwait hs st) >>= \case
+await = do Source src aw pr <- get
+           lift (aw src) >>= \case
              Nothing -> return Nothing
-             Just (x,st') -> Just x <$ put (hs,st')
+             Just (x, src') -> Just x <$ put (Source src' aw pr)
 {-# INLINE await #-}
 
 -- | Push a value back into a parser's source.
@@ -105,24 +78,17 @@ ropePrecede xs (Value ys : ms) = Value (xs++ys) : ms
 
 -- | Push a stream of values back into a parser's source.
 precede :: Monad m => [i] -> ParserT m src i ()
-precede xs = do (hs,st) <- get
-                put (hs, srcPrecede hs xs st)
+precede xs = do Source src aw pr <- get
+                put (Source (pr xs src) aw pr)
 {-# INLINE precede #-}
 
--- | Run a 'Parser' with a given input stream.
-parse :: Monad m => Parser m i o -> [i] -> m (o, Input m [i])
-parse m xs = second snd <$> runStateT m (unconsSource, [Value xs])
-{-# INLINE parse #-}
-
-runParser :: Monad m => Parser m i o -> Input m [i] -> m (o, Input m [i])
-runParser m xs = second snd <$> runStateT m (unconsSource, xs)
-
+-- | Evaluate a 'Parser' with a given input stream.
 evalParse :: Monad m => Parser m i o -> [i] -> m o
-evalParse m xs = evalStateT m (unconsSource, [Value xs])
+evalParse m xs = evalStateT m (unconsSource [Value xs])
 
 -- * Operations on Parsers
 
--- | 'awaitP' that throws an error with the given message if no more
+-- | 'await' that throws an error with the given message if no more
 -- input is available. This may be used to locate where in a
 -- processing pipeline input was unexpectedly exhausted.
 awaitJust :: (Monad m, HasError m) => String -> ParserT m src i i
@@ -153,42 +119,44 @@ takingWhile p = go id
 {-# INLINE takingWhile #-}
 
 insertInputSegment :: Monad m => src -> m () -> ParserT m (Input m src) i ()
-insertInputSegment xs k = modify' (second ([Value xs, Action k]++))
+insertInputSegment xs k =
+  modify' (\s -> s { srcSrc = [Value xs, Action k] ++ srcSrc s})
 
 onInputSegment :: Monad m => (src -> src) -> ParserT m (Input m src) i ()
-onInputSegment f = do (hs,st) <- get
-                      case st of
-                        [] -> return ()
-                        (Value xs : ys) -> put (hs, Value (f xs) : ys)
-                        (Action m : xs) -> lift m >> put (hs,xs) >> onInputSegment f
+onInputSegment f =
+  do Source src aw pr <- get
+     case src of
+       [] -> return ()
+       (Value xs : ys) -> put (Source (Value (f xs) : ys) aw pr)
+       (Action m : xs) -> lift m >> put (Source xs aw pr) >> onInputSegment f
 {-# INLINABLE onInputSegment #-}
 
 -- * Parser Transformations
 
-onChunks :: Monad m => ParserT m (Input m [i]) [i] r -> Parser m i r
-onChunks m = do (hs,st) <- get
-                (r, (_,st')) <- lift (runStateT m (chunkSource, st))
-                r <$ put (hs,st')
-
+-- | A parser on lists of things can embed a parser on things. For
+-- example, if we have a parser on lists of words, we can embed a
+-- parser on individual words.
 onElements :: Monad m => ParserT m (Input m [[i]]) i r -> Parser m [i] r
-onElements m = do (hs,st) <- get
-                  (r, (_,st')) <- lift (runStateT m (flattenSource, st))
-                  let onHead _ [] = []
-                      onHead f (x:xs) = f x : xs
-                  r <$ put (hs, onHead (fmap (dropWhile null)) st')
+onElements m = do s@(Source _ aw pr) <- get
+                  (r, Source src' _ _) <- lift (runStateT m (flattenSource s))
+                  r <$ put (Source (onHead (fmap (dropWhile null)) src') aw pr)
+  where onHead _ [] = []
+        onHead f (x:xs) = f x : xs
 {-# INLINE onElements #-}
 
-onIsomorphism :: forall m a b src r. Monad m
-              => (a -> b) -> (b -> Maybe a)
+-- | Given a function with type @a -> b@, and a partial inverse, @b ->
+-- Maybe a@, we can embed a parser on values of type @b@ in a parser
+-- on values of type @a@.
+onIsomorphism :: Monad m
+              => (a -> b)
+              -> (b -> Maybe a)
               -> ParserT m ([b],src) b r
               -> ParserT m src a r
 onIsomorphism fwd bwd m =
-  do (hs,st) <- get
-     let aw :: ([b],src) -> m (Maybe (b, ([b], src)))
-         aw ([], src) = fmap (fmap (fwd *** ([],))) (srcAwait hs src)
-         aw ((b:bs), src) = return (Just (b, (bs,src)))
-         pr xs (bs,src) = (xs++bs, src)
-         mappedSpring = Source aw pr
-     (r, (_, (bs, st'))) <- lift (runStateT m (mappedSpring, ([], st)))
-     r <$ put (hs, srcPrecede hs (mapMaybe bwd bs) st')
+  do Source src aw pr <- get
+     let aw' ([], src') = fmap (fmap (fwd *** ([],))) (aw src')
+         aw' ((b:bs), src') = return (Just (b, (bs,src')))
+         pr' xs (bs, src') = (xs++bs, src')
+     (r, Source (bs, src') _ _) <- lift (runStateT m (Source ([],src) aw' pr'))
+     r <$ put (Source (pr (mapMaybe bwd bs) src') aw pr)
 {-# INLINE onIsomorphism #-}
