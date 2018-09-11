@@ -1,6 +1,9 @@
-{-# LANGUAGE OverloadedStrings, ViewPatterns #-}
+{-# LANGUAGE CPP, OverloadedStrings, ViewPatterns #-}
 module Hpp.Macro (parseDefinition) where
 import Data.Char (isSpace)
+#if __GLASGOW_HASKELL__ < 804
+import Data.Semigroup ((<>))
+#endif
 import Hpp.StringSig
 import Hpp.Tokens (trimUnimportant, importants, Token(..), isImportant)
 import Hpp.Types (Macro(..), String, TOKEN, Scan(..))

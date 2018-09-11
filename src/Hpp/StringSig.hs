@@ -6,6 +6,9 @@ module Hpp.StringSig where
 import Data.Char
 import qualified Data.List as L
 import Data.Maybe (isJust)
+#if __GLASGOW_HASKELL__ < 804
+import Data.Semigroup (Semigroup)
+#endif
 import Data.String (IsString)
 import qualified Hpp.String as S
 import Data.ByteString (ByteString)
@@ -16,7 +19,7 @@ import System.IO (Handle, hPutStr)
 data CharOrSub s = CharMatch !s !s | SubMatch !s !s | NoMatch
 
 -- | A collection of operations relating to sequences of characters.
-class (IsString s, Monoid s) => Stringy s where
+class (IsString s, Monoid s, Semigroup s) => Stringy s where
   -- | Stringification puts double quotes around a string and
   -- backslashes before existing double quote characters and backslash
   -- characters.

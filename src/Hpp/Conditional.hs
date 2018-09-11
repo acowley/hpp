@@ -1,6 +1,9 @@
-{-# LANGUAGE BangPatterns, OverloadedStrings #-}
+{-# LANGUAGE BangPatterns, CPP, OverloadedStrings #-}
 -- | Parsing functionality for pre-processor conditionals.
 module Hpp.Conditional (dropBranch, takeBranch) where
+#if __GLASGOW_HASKELL__ < 804
+import Data.Semigroup ((<>))
+#endif
 import Data.String (fromString)
 import Hpp.Parser (replace, awaitJust, Parser)
 import Hpp.Tokens (notImportant, Token(..))

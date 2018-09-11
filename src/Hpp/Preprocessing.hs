@@ -1,4 +1,4 @@
-{-# LANGUAGE BangPatterns, OverloadedStrings #-}
+{-# LANGUAGE BangPatterns, CPP, OverloadedStrings #-}
 -- | The simplest pre-processing steps are represented as distinct
 -- passes over input lines.
 module Hpp.Preprocessing
@@ -11,6 +11,9 @@ module Hpp.Preprocessing
   ) where
 import Control.Arrow (first)
 import Data.Char (isSpace)
+#if __GLASGOW_HASKELL__ < 804
+import Data.Semigroup ((<>))
+#endif
 import Data.String (fromString)
 import Hpp.Config
 import Hpp.StringSig
