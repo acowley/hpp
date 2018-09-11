@@ -1,3 +1,8 @@
+# 0.6.1
+- Added the `--only-macros` command line flag. Does not splice lines, remove comments, or do trigraph replacement. It does macro processing and #line marker output (which can be disabled with the `-P` option)
+
+- Changed the default configuration to emit `#line` markers. Can be disabled with `-P`.
+
 # 0.6.0
 
 - Various bug fixes by @rahulmutt. These may change behavior not captured by the MCPP test suite.

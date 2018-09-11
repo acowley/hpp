@@ -1,5 +1,5 @@
 name:                hpp
-version:             0.6.0.2
+version:             0.6.1
 synopsis:            A Haskell pre-processor
 description:         See the README for usage examples
 license:             BSD3
