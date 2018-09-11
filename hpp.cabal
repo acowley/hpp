@@ -35,7 +35,7 @@ library
                        Hpp.StringSig,
                        Hpp.Tokens,
                        Hpp.Types
-  build-depends:       base >=4.8 && <4.12, directory, time >=1.5, filepath,
+  build-depends:       base >=4.8 && <4.13, directory, time >=1.5, filepath,
                        transformers >=0.4, bytestring, unordered-containers,
                        ghc-prim
 
