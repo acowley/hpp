@@ -6,8 +6,6 @@ import Hpp.Env
 import Hpp.Tokens
 import Hpp.Types
 
-
-
 testProg :: Int -> String
 testProg n = "mcpp-2.7.2/test-c/n_" ++ show n++".c"
 
@@ -24,13 +22,13 @@ squashBlanks = unlines . go . lines
 runTestProg :: String -> IO (Env, String)
 runTestProg f =
   do src <- readFile f
-     runErrHppIO 
+     runErrHppIO
          cfg
          (preprocess [ ("__x86_64__", Object [Important "1"])
                      , ("__GNUC__", Object [Important "4"])
                      , ("__STDC__", Object [Important "1"])
                      , ("__DARWIN_ONLY_UNIX_CONFORMANCE", Object [Important "1"])
-                     , ("_POSIX_C_SOURCE", Object [Important "1"]) 
+                     , ("_POSIX_C_SOURCE", Object [Important "1"])
                      ]
                      src)
   where Just cfg =
