@@ -29,15 +29,13 @@ usage = mapM_ putStrLn
   , "  No line splicing, no comment removal, no trigraph replacement."
   , "  Only macros (including conditionals) and line marker output."
   , "-P"
-  , "  Inhibit #line markers (when this option is given after --cpp)"
+  , "  Inhibit #line markers."
   , "--fline-splice"
   , "  Enable continued line splicing."
   , "--ferase-comments"
   , "  Remove all C-style comments before processing."
   , "--freplace-trigraphs"
-  , "  Replace trigraph sequences before processing."
-  , "--fline-markers"
-  , "  Enable emission of #line markers in output"]
+  , "  Replace trigraph sequences before processing."]
 
 main :: IO ()
 main = do getArgs >>= \case

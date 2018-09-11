@@ -102,7 +102,7 @@ prepTime = runIdentity . prepTimeF
 -- markers are inhibited, and trigraph replacement is disabled.
 defaultConfigF :: ConfigF Maybe
 defaultConfigF = Config Nothing (Just [])
-                        (Just True) (Just True) (Just True) (Just False)
+                        (Just True) (Just True) (Just False) (Just False)
                         (Just (DateString "??? ?? ????"))
                         (Just (TimeString "??:??:??"))
 
