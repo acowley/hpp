@@ -85,6 +85,8 @@ parseArgs cfg0 = go emptyEnv id cfg0 Nothing . concatMap breakEqs
           go env acc cfg out rst -- We ignore source language specification
         go env acc cfg out ("-traditional":rst) =
           go env acc cfg out rst -- Ignore the "-traditional" flag
+        go env acc cfg out ("-Werror":rst) =
+          go env acc cfg out rst -- Ignore the "-Werror" flag
         go env acc cfg Nothing (file:rst) =
           case curFileNameF cfg of
             Nothing -> go env acc (cfg { curFileNameF = Just file }) Nothing rst
