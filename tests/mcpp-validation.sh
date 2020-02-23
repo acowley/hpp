@@ -3,6 +3,7 @@
 HOST='http://prdownloads.sourceforge.net/mcpp/mcpp-2.7.2.tar.gz?download'
 FILE='mcpp-2.7.2.tar.gz'
 GCC=gcc
+CABAL=${CABALBUILD:-cabal v2-build}
 
 # Note: head -n -1 would be faster than "sed '$ d'", but doesn't work
 # with BSD or OS X head.
@@ -31,12 +32,12 @@ if ! [ -f tool/cpp_test ]; then
   fi
 fi
 
-# echo 'Building hpp'
-# (cd .. && cabal build)
-# if ! [ $? -eq 0 ]; then
-#   echo 'Building hpp failed'
-#   exit 1
-# fi
+echo 'Building hpp'
+(cd .. && ${CABAL})
+if ! [ $? -eq 0 ]; then
+  echo 'Building hpp failed'
+  exit 1
+fi
 
 echo 'Running the validation suite'
 
@@ -48,8 +49,11 @@ echo 'Running the validation suite'
 # Note that we define __i386__ as the architecture as the MCPP
 # validation test n_12.c assumes a long is 32 bits.
 
-(cd mcpp-2.7.2/test-c &&  ../tool/cpp_test HPP "$(find $(pwd)/../../../dist-newstyle -type f -executable -name hpp) ${GCCDIR} --cpp -D__x86_64__ %s.c | gcc -o %s -w -x c -" "rm %s" < n_i_.lst)
-
+if [ -z "$TRAVIS" ]; then
+    (cd mcpp-2.7.2/test-c &&  ../tool/cpp_test HPP "$(find $(pwd)/../../../dist-newstyle -type f -executable -name hpp) ${GCCDIR} --cpp -D__x86_64__ %s.c | gcc -o %s -w -x c -" "rm %s" < n_i_.lst)
+else
+    (cd mcpp-2.7.2/test-c &&  ../tool/cpp_test HPP "$(find $(pwd)/../../../../dist-newstyle -type f -executable -name hpp) ${GCCDIR} --cpp -D__x86_64__ %s.c | gcc -o %s -w -x c -" "rm %s" < n_i_.lst)
+fi    
 if ! [ $? -eq 0 ]; then
   echo 'The test runner exited with an error.'
   exit 1
