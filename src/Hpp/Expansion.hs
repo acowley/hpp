@@ -1,4 +1,4 @@
-{-# LANGUAGE LambdaCase, OverloadedStrings, RankNTypes, ScopedTypeVariables #-}
+{-# LANGUAGE CPP, LambdaCase, OverloadedStrings, RankNTypes, ScopedTypeVariables #-}
 -- | Line expansion is the core input token processing
 -- logic. Object-like macros are substituted, and function-like macro
 -- applications are expanded.
@@ -8,7 +8,9 @@ import Data.Bool (bool)
 import Data.Foldable (foldl', traverse_)
 import Data.List (delete)
 import Data.Maybe (listToMaybe, mapMaybe)
+#if __GLASGOW_HASKELL__ < 808
 import Data.Monoid ((<>))
+#endif
 import Data.String (fromString)
 import Hpp.Config (Config, curFileName,
                    getDateString, getTimeString, prepDate, prepTime)

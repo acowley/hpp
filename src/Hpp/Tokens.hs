@@ -1,4 +1,4 @@
-{-# LANGUAGE BangPatterns, OverloadedStrings, ViewPatterns #-}
+{-# LANGUAGE BangPatterns, CPP, OverloadedStrings, ViewPatterns #-}
 -- | Tokenization breaks a 'String' into pieces of whitespace,
 -- constants, symbols, and identifiers.
 module Hpp.Tokens (Token(..), detok, isImportant, notImportant, importants,
@@ -7,7 +7,9 @@ module Hpp.Tokens (Token(..), detok, isImportant, notImportant, importants,
 import Control.Arrow (first, second)
 import Data.Char (isAlphaNum, isDigit, isSpace, isOctDigit, isHexDigit, digitToInt)
 import Data.Foldable (foldl')
+#if __GLASGOW_HASKELL__ < 808
 import Data.Monoid ((<>))
+#endif
 import Data.String (IsString, fromString)
 import Hpp.StringSig
 
