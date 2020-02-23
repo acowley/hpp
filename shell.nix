@@ -1,24 +1,17 @@
-{ compiler ? "ghc843"
+{ compiler ? "ghc865"
 , withHoogle ? true
+, sources ? import ./nix/sources.nix
 }:
-
 let
-  pkgs = import <nixpkgs> {};
-  f = import ./default.nix;
-  packageSet = pkgs.haskell.packages.${compiler};
-  hspkgs = (
-    if withHoogle then
-      packageSet.override {
-        overrides = (self: super: {
-      ghc = super.ghc // { withPackages = f: super.ghc.withHoogle (ps: f ps ++ [ps.intero ps.
-cabal-install]); };
-          intero = pkgs.haskell.lib.dontCheck (super.callPackage ~/src/intero {});
-          # ListLike = pkgs.haskell.lib.addBuildDepend super.ListLike super.semigroups;
-          ghcWithPackages = self.ghc.withPackages;
-        });
-      }
-      else packageSet
-  );
-  drv = hspkgs.callPackage f {};
-in
-  if pkgs.lib.inNixShell then drv.env else drv
+  pkgs = import sources.nixpkgs {};
+  ghcide = (import (builtins.fetchTarball "https://github.com/hercules-ci/ghcide-nix/archive/caab5c37a80c4b706ebdc5b50ad610cc96d6b9e2.tar.gz") {}).ghcide-ghc865;
+  hspkgs = pkgs.haskell.packages.${compiler};
+  drv = hspkgs.callPackage ./default.nix {};
+  ghc = hspkgs.ghc.withHoogle (ps: drv.passthru.getBuildInputs.haskellBuildInputs ++ [ps.cabal-install]);
+in pkgs.mkShell {
+  buildInputs = [ ghc ghcide pkgs.cabal2nix ];
+  shellHook = ''
+    source <(grep '^export NIX_' ${ghc}/bin/ghc)
+    source <(echo 'export HIE_HOOGLE_DATABASE='$(grep -F -- '--database' ${ghc}/bin/hoogle | sed 's/.* --database \(.*\.hoo\).*/\1/'))
+  '';
+}
