@@ -1,5 +1,5 @@
 name:                hpp
-version:             0.6.3
+version:             0.6.4
 synopsis:            A Haskell pre-processor
 description:         See the README for usage examples
 license:             BSD3
@@ -12,7 +12,7 @@ build-type:          Simple
 extra-source-files:  tests/mcpp-validation.sh, CHANGELOG.md, README.md
 cabal-version:       >=1.10
 homepage:            https://github.com/acowley/hpp
-tested-with:         GHC == 8.4.4 || == 8.6.5 || == 8.8.3 || == 8.10.1
+tested-with:         GHC == 8.4.4 || == 8.6.5 || == 8.8.3 || == 8.10.4 || == 9.0.1
 
 source-repository head
   type:     git
@@ -35,7 +35,7 @@ library
                        Hpp.StringSig,
                        Hpp.Tokens,
                        Hpp.Types
-  build-depends:       base >=4.8 && < 4.15, directory, time >=1.5, filepath,
+  build-depends:       base >=4.8 && < 4.16, directory, time >=1.5, filepath,
                        transformers >=0.4, bytestring, unordered-containers,
                        ghc-prim
 

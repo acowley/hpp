@@ -1,3 +1,6 @@
+# 0.6.4
+GHC-9.0 compatibility
+
 # 0.6.1
 - Added the `--only-macros` command line flag. Does not splice lines, remove comments, or do trigraph replacement. It does macro processing and #line marker output (which can be disabled with the `-P` option)
 

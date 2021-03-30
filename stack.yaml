@@ -1,17 +1,4 @@
-# resolver: lts-7.7
-resolver: ghc-8.4.3
+resolver: lts-17.8
 
 packages:
-- '.'
-
-extra-deps: []
-
-# Override default flag values for local packages and extra-deps
-flags: {}
-
-# Extra package databases containing global packages
-extra-package-dbs: []
-
-nix:
-  enable: true
-  shell-file: shell.nix
+- .
