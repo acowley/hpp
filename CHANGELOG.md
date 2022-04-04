@@ -1,3 +1,6 @@
+# 0.6.5
+Bump bounds on `base` and `semigroups`.
+
 # 0.6.4
 GHC-9.0 compatibility
 

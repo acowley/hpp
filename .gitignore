@@ -1,5 +1,4 @@
 /dist
-/default.nix
 /cabal.sandbox.config
 /buildplan
 /.cabal-sandbox
