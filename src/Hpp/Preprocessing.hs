@@ -69,29 +69,39 @@ breakBlockCommentStart s =
   case breakCharOrSub '"' "/*" s of
     NoMatch -> Nothing
     CharMatch pre pos -> let (lit, rest) = skipLiteral pos
-                         in first ((pre <> lit) <>) <$>
+                         in first ((snoc pre '"' <> lit) <>) <$>
                             breakBlockCommentStart rest
     SubMatch pre pos -> Just (pre, pos)
 
 breakBlockCommentEnd :: Stringy s => s -> Maybe s
 breakBlockCommentEnd s =
-  case breakCharOrSub '"' "*/" s of
-    NoMatch -> Nothing
-    CharMatch _ pos -> let (_, rest) = skipLiteral pos
-                       in breakBlockCommentEnd rest
-    SubMatch _ pos -> Just pos
+  case breakOn [("*/",())] s of
+    Nothing -> Nothing
+    Just (_,_,pos) -> Just pos
+
+dropOneLineComments :: Stringy s => s -> s
+dropOneLineComments s =
+  case breakCharOrSub '"' "//" s of
+    NoMatch -> s
+    CharMatch pre pos ->
+      let (lit,rest) = skipLiteral pos
+      in snoc pre '"' <> lit <> dropOneLineComments rest
+    SubMatch pre _pos -> pre
 
 dropOneLineBlockComments :: Stringy s => s -> s
 dropOneLineBlockComments s =
-  case breakCharOrSub '"' "/*"s of
+  case breakCharOrSub '"' "/*" s of
     NoMatch -> s
     CharMatch pre pos ->
       let (lit,rest) = skipLiteral pos
       in snoc pre '"' <> lit <> dropOneLineBlockComments rest
     SubMatch pre pos ->
       case breakOn [("*/", ())] pos of
-        Nothing -> pre <> "/*"
-        Just (_,_,pos') -> snoc pre ' ' <> dropOneLineBlockComments pos'
+        Nothing -> pre <> "/*" <> pos
+        Just (_,_,pos')
+          | isEmpty pos' -> pre
+          -- only add a space if we're not at the end of the line
+          | otherwise    -> snoc pre ' ' <> dropOneLineBlockComments pos'
 
 removeMultilineComments :: Stringy s => Int -> [s] -> [s]
 removeMultilineComments !lineStart = goStart lineStart
@@ -111,15 +121,29 @@ removeMultilineComments !lineStart = goStart lineStart
                              : ("#line "<> fromString (show (curLine+1)))
                              : goStart (curLine+1) lns
 
--- | Remove C-style comments bracketed by @/*@ and @*/@.
+-- | Remove C-style comments bracketed by @/*@ and @*/@ and one-line '//'
+-- comments.
 cCommentRemoval :: Stringy s => [s] -> [s]
-cCommentRemoval = removeMultilineComments 1 . map dropOneLineBlockComments
+cCommentRemoval = cCommentRemoval' False
 
 -- | Remove C-style comments bracked by @/*@ and @*/@ and perform
 -- trigraph replacement.
 cCommentAndTrigraph :: Stringy s => [s] -> [s]
-cCommentAndTrigraph = removeMultilineComments 1
-                    . map (dropOneLineBlockComments . trigraphReplacement)
+cCommentAndTrigraph = cCommentRemoval' True
+
+-- | Remove C-style comments bracketed by @/*@ and @*/@ and one-line '//'
+-- comments, and optionally perform trigraph replacement.
+cCommentRemoval' :: Stringy s => Bool -> [s] -> [s]
+cCommentRemoval' do_trigraphs =
+  -- important: drop '//' comments last, otherwise we would try to remove '//'
+  -- comments into block comments. For example:
+  --    <https://www.foo.org>. */
+  --  would become
+  --    <https:
+  map dropOneLineComments
+  . removeMultilineComments 1
+  . map dropOneLineBlockComments
+  . (if do_trigraphs then map trigraphReplacement else id)
 
 prepareInput :: (Monad m, HasHppState m) => m ([String] -> [[TOKEN]])
 prepareInput =

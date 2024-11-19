@@ -1,11 +1,15 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE CPP #-}
 import Control.Monad.Trans.Except
 import Data.ByteString.Char8 (ByteString)
 import Data.Maybe (fromMaybe)
-import Data.Monoid ((<>))
 import Hpp
 import qualified Hpp.Config as C
 import qualified Hpp.Types as T
+
+#if __GLASGOW_HASKELL__ <= 802
+import Data.Monoid ((<>))
+#endif
 
 import System.Exit
 
@@ -71,6 +75,9 @@ hppConfig st = T.over T.config opts $ st
              . T.setL C.replaceTrigraphsL False
              . T.setL C.inhibitLinemarkersL False
 
+remove_comments :: HppState -> HppState
+remove_comments = T.over T.config (T.setL C.eraseCCommentsL True)
+
 testCommentsAndSplice1 :: IO Bool
 testCommentsAndSplice1 =
   hppHelper (hppConfig
@@ -106,11 +113,64 @@ testMacroNoArgs =
             , "baz\n"
             ]
 
+testMacroInComments :: IO Bool
+testMacroInComments = do
+  hppHelper (remove_comments $ hppConfig emptyHppState)
+            [ "#define FOO(a) a+a"
+            , "// Blah FOO() blah"
+            , "/* Blah FOO() blah */"
+            ]
+            [ "\n"
+            , "\n"
+            ]
+
+testCommentInBlock :: IO Bool
+testCommentInBlock = do
+  hppHelper (remove_comments $ hppConfig emptyHppState)
+            [ "foo"
+            , "/* blah"
+            , "   https://foo.bar */"
+            , "bar"
+            ]
+            [ "foo\n"
+            , "bar\n"
+            ]
+
+testLitBeforeCommentBlock :: IO Bool
+testLitBeforeCommentBlock = do
+  hppHelper (remove_comments $ hppConfig emptyHppState)
+            [ "foo"
+            , "\"something\"/* blah"
+            , "   */"
+            , "bar"
+            ]
+            [ "foo\n"
+            , "\"something\"\n"
+            , "bar\n"
+            ]
+
+testQuoteInCommentBlock :: IO Bool
+testQuoteInCommentBlock = do
+  hppHelper (remove_comments $ hppConfig emptyHppState)
+            [ "foo"
+            , "/* blah"
+            , "  \" */"
+            , "bar"
+            ]
+            [ "foo\n"
+            , "bar\n"
+            ]
+
 main :: IO ()
 main = do results <- sequenceA [ testElse, testIf, testArith1
                                , testCommentsAndSplice1
                                , testCommentsAndSplice2
-                               , testMacroNoArgs ]
+                               , testMacroNoArgs
+                               , testMacroInComments
+                               , testCommentInBlock
+                               , testLitBeforeCommentBlock
+                               , testQuoteInCommentBlock
+                               ]
           if and results
             then do putStrLn (show (length results) ++ " tests passed")
                     exitWith ExitSuccess
