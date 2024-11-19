@@ -99,7 +99,12 @@ appParse = droppingWhile isSpaceScan >> checkApp
                         case unscan tok of
                           Just (Important ")") -> return (acc [arg])
                           _ -> replace tok >> getArg (acc . (arg:))
-        goApp = fmap Just (getArg id)
+        goApp = do
+          tok <- awaitJust "appParse goApp"
+          case unscan tok of
+            -- handle macros with empty argument list
+            Just (Important ")") -> return (Just [])
+            _ -> replace tok >> fmap Just (getArg id)
 
 -- | Emit the tokens of a single argument. Returns 'True' if this is
 -- the final argument in an application (indicated by an unbalanced

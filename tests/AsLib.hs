@@ -93,10 +93,24 @@ testCommentsAndSplice2 =
             , "Do you\\\n"
             , "understand?\n" ]
 
+testMacroNoArgs :: IO Bool
+testMacroNoArgs =
+  hppHelper (hppConfig emptyHppState)
+            [ "#define FOO() foo"
+            , "bar"
+            , "FOO()"
+            , "baz"
+            ]
+            [ "bar\n"
+            , "foo\n"
+            , "baz\n"
+            ]
+
 main :: IO ()
 main = do results <- sequenceA [ testElse, testIf, testArith1
                                , testCommentsAndSplice1
-                               , testCommentsAndSplice2 ]
+                               , testCommentsAndSplice2
+                               , testMacroNoArgs ]
           if and results
             then do putStrLn (show (length results) ++ " tests passed")
                     exitWith ExitSuccess
