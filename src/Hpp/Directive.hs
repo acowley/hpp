@@ -14,7 +14,7 @@ import Hpp.Expansion (expandLineState)
 import Hpp.Expr (evalExpr, parseExpr)
 import Hpp.Macro (parseDefinition)
 import Hpp.Preprocessing (prepareInput)
-import Hpp.StringSig (unquote, toChars)
+import Hpp.StringSig (unquote, toChars, sIsPrefixOf, sdrop)
 import Hpp.Tokens (newLine, notImportant, trimUnimportant, detokenize, isImportant, Token(..))
 import Hpp.Types
 import Hpp.Parser (replace, await, insertInputSegment, takingWhile, droppingWhile, onInputSegment, evalParse, onElements, awaitJust, ParserT, Parser)
@@ -136,6 +136,16 @@ directive = lift (onElements (awaitJust "directive")) >>= aux
                         let tokStr = toChars (detokenize toks)
                         throwError $ UserError ln (tokStr++" ("++curFile++")")
           "warning" -> True <$ lift dropLine -- warnings not yet supported
+
+          -- our emitted "#HPP line" pragmas: we need to interpret them to set
+          -- the lineNume and emit proper "#line" pragmas in the output stream.
+          s | "HPP line " `sIsPrefixOf` s
+            -> do
+                let n = sdrop 9 s
+                lift (replace [Important ("#line " <> n)])
+                lineNum .= read (toChars n) - 1
+                pure True
+
           t -> do toks <- lift takeLine
                   ln <- subtract 1 <$> use lineNum
                   throwError $ UnknownCommand ln
