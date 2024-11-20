@@ -6,8 +6,9 @@ import Data.Semigroup ((<>))
 #endif
 import Hpp.StringSig
 import Hpp.Tokens (trimUnimportant, importants, Token(..), isImportant)
-import Hpp.Types (Macro(..), String, TOKEN, Scan(..))
+import Hpp.Types (Macro(..), String, TOKEN, Scan(..), Variadic(..))
 import Prelude hiding (String)
+import qualified Data.List as List
 
 -- * TOKEN Splices
 
@@ -32,9 +33,13 @@ parseDefinition :: [TOKEN] -> Maybe (String, Macro)
 parseDefinition toks =
   case dropWhile (not . isImportant) toks of
     (Important name:Important "(":rst) ->
-      let params = takeWhile (/= ")") $ filter (/= ",") (importants rst)
-          body = trimUnimportant . tail $ dropWhile (/= Important ")") toks
-          macro = Function (length params) (functionMacro params body)
+      let params0 = takeWhile (/= ")") $ filter (/= ",") (importants rst)
+          arity0  = length params0
+          (params, arity, variadic) = case splitAt (arity0 - 3) params0 of
+            (as, [".",".","."]) -> (as, arity0 - 3, Variadic)
+            _                   -> (params0, arity0, NotVariadic)
+          body = trimUnimportant . drop 1 $ dropWhile (/= Important ")") toks
+          macro = Function variadic arity (functionMacro variadic arity params body)
       in Just (name, macro)
     (Important name:_) ->
       let rhs = case dropWhile (/= Important name) toks of
@@ -66,14 +71,27 @@ paste (t:ts) = t : paste ts
 -- | @functionMacro parameters body arguments@ substitutes @arguments@
 -- for @parameters@ in @body@ and performs stringification for uses of
 -- the @#@ operator and token concatenation for the @##@ operator.
-functionMacro :: [String] -> [TOKEN] -> [([Scan],String)] -> [Scan]
-functionMacro params body = paste
-                          . subst body'
-                          -- . M.fromList
-                          . zip params'
-  where params' = map copy params
+functionMacro :: Variadic -> Int -> [String] -> [TOKEN] -> [([Scan],String)] -> [Scan]
+functionMacro variadic arity params body args
+  = paste . subst body' {- . M.fromList -} . zip params' $ args'
+  where (args',var_args) = case variadic of
+          NotVariadic -> (args,[])
+          Variadic    -> List.splitAt arity args
+        params' = map copy params
         subst toks gamma = go toks
           where go [] = []
+                -- handle __VA_ARGS__ first
+                go ((Important ","):(Important "##"):(Important "__VA_ARGS__"):ts)
+                  | Variadic <- variadic
+                  , [] <- var_args
+                  = go ts -- GCC extension: we drop the leading comma if __VA_ARGS__ is empty
+                go ((Important "__VA_ARGS__"):ts)
+                  | Variadic <- variadic
+                  = let vas = map (Rescan . Important . snd) var_args
+                    in List.intersperse (Rescan (Important ",")) vas ++ go ts
+
+                -- TODO: handle __VA_OPT__ here
+
                 go (p@(Important "##"):t@(Important s):ts) =
                   case lookup s gamma of
                     Nothing -> Rescan p : Rescan t : go ts

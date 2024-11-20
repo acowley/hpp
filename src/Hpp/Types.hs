@@ -232,18 +232,26 @@ data Scan = Unmask String
 
 -- * Macros
 
+data Variadic
+  = Variadic
+  | NotVariadic
+
 -- | There are object-like macros and function-like macros.
 data Macro = Object [Token String]
            -- ^ An object-like macro is replaced with its definition
-           | Function Int ([([Scan], String)] -> [Scan])
-           -- ^ A function-like macro of some arity taks
+           | Function !Variadic !Int ([([Scan], String)] -> [Scan])
+           -- ^ A function-like macro of some arity takes
            -- macro-expanded and raw versions of its arguments, then
            -- substitutes them into a body producing a new set of
            -- tokens.
+           --
+           -- Variadic function-like macro (e.g. FOO(a,b,...)) accepts more
+           -- arguments and bind them to __VA_ARGS__.
 
 instance Show Macro where
   show (Object ts) = "Object "++ toChars (detokenize ts)
-  show (Function n _) = "Fun<"++show n++">"
+  show (Function NotVariadic n _) = "Fun<"++show n++">"
+  show (Function Variadic n _) = "Fun<"++show n++"...>"
 
 -- | Looks up a 'Macro' in the current environment. If the 'Macro' is
 -- found, the environment is juggled so that subsequent lookups of the
