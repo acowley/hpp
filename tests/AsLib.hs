@@ -41,19 +41,6 @@ hppHelper st src expected =
 hppHelper' :: HppState -> [ByteString] -> [ByteString] -> IO Bool
 hppHelper' = hppHelper . T.over T.config (T.setL C.inhibitLinemarkersL True)
 
-testElse :: IO Bool
-testElse = hppHelper' emptyHppState sourceIfdef ["x = 99\n","\n"]
-
-testIf :: IO Bool
-testIf = hppHelper' (fromMaybe (error "Preprocessor definition did not parse")
-                      (addDefinition "FOO" "1" emptyHppState))
-                    sourceIfdef
-                    ["x = 42\n","\n"]
-
-testArith1 :: IO Bool
-testArith1 = (&&) <$> hppHelper' emptyHppState (sourceArith1 "7") ["yay\n","\n"]
-                  <*> hppHelper' emptyHppState (sourceArith1 "8") ["boo\n","\n"]
-
 sourceCommentsAndSplice :: [ByteString]
 sourceCommentsAndSplice =
   [ "#ifdef FOO"
@@ -78,9 +65,19 @@ hppConfig st = T.over T.config opts $ st
 remove_comments :: HppState -> HppState
 remove_comments = T.over T.config (T.setL C.eraseCCommentsL True)
 
-testCommentsAndSplice1 :: IO Bool
-testCommentsAndSplice1 =
-  hppHelper (hppConfig
+tests :: [IO Bool]
+tests =
+  [ hppHelper' emptyHppState sourceIfdef ["x = 99\n","\n"]
+
+  , hppHelper' (fromMaybe (error "Preprocessor definition did not parse")
+                          (addDefinition "FOO" "1" emptyHppState))
+                    sourceIfdef
+                    ["x = 42\n","\n"]
+
+  , (&&) <$> hppHelper' emptyHppState (sourceArith1 "7") ["yay\n","\n"]
+         <*> hppHelper' emptyHppState (sourceArith1 "8") ["boo\n","\n"]
+
+  , hppHelper (hppConfig
               (fromMaybe (error "Preprocessor definition did not parse")
                (addDefinition "FOO" "1" emptyHppState)))
             sourceCommentsAndSplice
@@ -89,9 +86,7 @@ testCommentsAndSplice1 =
             , "Do you\\\n"
             , "understand?\n" ]
 
-testCommentsAndSplice2 :: IO Bool
-testCommentsAndSplice2 =
-  hppHelper (hppConfig emptyHppState)
+  , hppHelper (hppConfig emptyHppState)
             sourceCommentsAndSplice
             [ "#line 4\n"
             , "I am /* an else branch\n"
@@ -100,9 +95,7 @@ testCommentsAndSplice2 =
             , "Do you\\\n"
             , "understand?\n" ]
 
-testMacroNoArgs :: IO Bool
-testMacroNoArgs =
-  hppHelper (hppConfig emptyHppState)
+  , hppHelper (hppConfig emptyHppState)
             [ "#define FOO() foo"
             , "bar"
             , "FOO()"
@@ -113,9 +106,7 @@ testMacroNoArgs =
             , "baz\n"
             ]
 
-testMacroInComments :: IO Bool
-testMacroInComments = do
-  hppHelper (remove_comments $ hppConfig emptyHppState)
+  , hppHelper (remove_comments $ hppConfig emptyHppState)
             [ "#define FOO(a) a+a"
             , "// Blah FOO() blah"
             , "/* Blah FOO() blah */"
@@ -124,9 +115,7 @@ testMacroInComments = do
             , "\n"
             ]
 
-testCommentInBlock :: IO Bool
-testCommentInBlock = do
-  hppHelper (remove_comments $ hppConfig emptyHppState)
+  , hppHelper (remove_comments $ hppConfig emptyHppState)
             [ "foo"
             , "/* blah"
             , "   https://foo.bar */"
@@ -136,9 +125,7 @@ testCommentInBlock = do
             , "bar\n"
             ]
 
-testLitBeforeCommentBlock :: IO Bool
-testLitBeforeCommentBlock = do
-  hppHelper (remove_comments $ hppConfig emptyHppState)
+  , hppHelper (remove_comments $ hppConfig emptyHppState)
             [ "foo"
             , "\"something\"/* blah"
             , "   */"
@@ -149,9 +136,7 @@ testLitBeforeCommentBlock = do
             , "bar\n"
             ]
 
-testQuoteInCommentBlock :: IO Bool
-testQuoteInCommentBlock = do
-  hppHelper (remove_comments $ hppConfig emptyHppState)
+  , hppHelper (remove_comments $ hppConfig emptyHppState)
             [ "foo"
             , "/* blah"
             , "  \" */"
@@ -161,16 +146,23 @@ testQuoteInCommentBlock = do
             , "bar\n"
             ]
 
+  , hppHelper (hppConfig emptyHppState)
+            [ "#define MULTI(a,b,...) (A=a,B=b,rest=__VA_ARGS__)"
+            , "MULTI(1,2,3,4,5,6)"
+            ]
+            [ "(A=1,B=2,rest=3,4,5,6)\n"
+            ]
+
+  , hppHelper (hppConfig emptyHppState)
+            [ "#define MULTI(a,b,...) (a,b,##__VA_ARGS__)"
+            , "MULTI(1,2)"
+            ]
+            [ "(1,2)\n"
+            ]
+  ]
+
 main :: IO ()
-main = do results <- sequenceA [ testElse, testIf, testArith1
-                               , testCommentsAndSplice1
-                               , testCommentsAndSplice2
-                               , testMacroNoArgs
-                               , testMacroInComments
-                               , testCommentInBlock
-                               , testLitBeforeCommentBlock
-                               , testQuoteInCommentBlock
-                               ]
+main = do results <- sequenceA tests
           if and results
             then do putStrLn (show (length results) ++ " tests passed")
                     exitWith ExitSuccess

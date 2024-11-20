@@ -20,7 +20,7 @@ import Hpp.Parser (Parser, ParserT, precede, replace, await, onIsomorphism,
 import Hpp.StringSig (stringify, uncons, isEmpty, toChars)
 import Hpp.Tokens (Token(..), notImportant, isImportant, detokenize)
 import Hpp.Types (hppConfig, hppLineNum, getState, HasHppState, HasError(..), HasEnv(..), Scan(..), Error(..), Macro(..),
-                  TOKEN, String, lookupMacro)
+                  TOKEN, String, Variadic(..), lookupMacro)
 import Prelude hiding (String)
 
 -- | Extract the 'TOKEN' payload from a 'Scan'.
@@ -141,17 +141,19 @@ argError lineNum name arity args =
 -- parsed arguments @args@, but there is an arity mismatch; or @Right
 -- tokens@ if the function application expanded successfully.
 expandFunction :: (Monad m, HasError m)
-               => String -> Int -> ([([Scan],String)] -> [Scan])
+               => String -> Variadic -> Int -> ([([Scan],String)] -> [Scan])
                -> (forall r'. [String] -> ParserT m src Scan r')
                -> ([Scan] -> ParserT m src Scan [Scan])
                -> ParserT m src Scan (Maybe [Scan])
-expandFunction name arity f mkErr expand =
+expandFunction name variadic arity f mkErr expand =
   do margs <- appParse
      case margs of
        Nothing -> return Nothing
        Just args
-         | length args /= arity -> mkErr $
-                                   map (detokenize . mapMaybe unscan) args
+         | NotVariadic <- variadic
+         , length args /= arity
+         -> mkErr $ map (detokenize . mapMaybe unscan) args
+
          | otherwise ->
            do args' <- mapM expand args
               let raw = map (detokenize . mapMaybe unscan) args
@@ -177,11 +179,11 @@ expandMacro cfg lineNum name tok =
                 case m of
                   Object t' ->
                     return $ Mask name : map Rescan (spaced t') ++ [Unmask name]
-                  Function arity f ->
+                  Function variadic arity f ->
                     let ex = expandLine' False cfg lineNum
                         err = lift . throwError
                             . argError lineNum name arity
-                    in do mts <- expandFunction name arity f err
+                    in do mts <- expandFunction name variadic arity f err
                                                 (lift . evalParse ex)
                           case mts of
                             Nothing -> return [tok]
