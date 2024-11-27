@@ -10,8 +10,12 @@ import Hpp.Tokens (notImportant, Token(..))
 import Hpp.Types (lineNum, use, HasHppState, HasError, LineNum, TOKEN, String)
 import Prelude hiding (String)
 
+-- | Emit a "#HPP line n" directive
+--
+-- This directive is interpreted by HPP to set the lineNum and to emit a proper
+-- "#line n" directive in the output stream.
 yieldLineNum :: LineNum -> [TOKEN]
-yieldLineNum !ln = [Important ("#line " <> fromString (show ln)), Other "\n"]
+yieldLineNum !ln = [Important "#", Important ("HPP line " <> fromString (show ln)), Other "\n"]
 
 getCmd :: [TOKEN] -> Maybe String
 getCmd = aux . dropWhile notImportant
@@ -39,14 +43,14 @@ dropBranchFun = go (1::Int) 0
 -- | Take everything up to the end of this branch, drop all remaining
 -- branches (if any).
 takeBranch :: LineNum -> [[TOKEN]] -> [[TOKEN]]
-takeBranch = go (1::Int)
+takeBranch n0 lns0 = yieldLineNum n0 : go (1::Int) n0 lns0
   where go _ _ [] = [] -- error: unterminated conditional
-        go 0 !n lns = yieldLineNum n : lns
         go !nesting !n (ln:lns) =
           case getCmd ln of
             Just cmd
               | cmd `elem` ["if","ifdef","ifndef"] ->
                 ln : go (nesting+1) (n+1) lns
+              | nesting == 1 && cmd == "endif" -> yieldLineNum (n+1) : lns
               | cmd == "endif" -> ln : go (nesting - 1) (n + 1) lns
               | nesting == 1 && cmd `elem` ["else","elif"] ->
                 let (numSkipped, lns') = dropBranchFun lns
