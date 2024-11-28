@@ -10,12 +10,18 @@ import Hpp.Tokens (notImportant, Token(..))
 import Hpp.Types (lineNum, use, HasHppState, HasError, LineNum, TOKEN, String)
 import Prelude hiding (String)
 
--- | Emit a "#HPP line n" directive
+-- | Emit a "#line ln" directive in the output stream
 --
--- This directive is interpreted by HPP to set the lineNum and to emit a proper
--- "#line n" directive in the output stream.
+-- In fact we emit:
+--  - ["#line ln", "\n"] tokens which will be passed directly in the output stream
+--  - ["#", "line", "ln", "\n"] tokens which will be interpreted by HPP to set
+--  the correct line number and will not be reemitted in the output stream.
+--
 yieldLineNum :: LineNum -> [TOKEN]
-yieldLineNum !ln = [Important "#", Important ("HPP line " <> fromString (show ln)), Other "\n"]
+yieldLineNum !ln =
+  [ Important ("#line " <> fromString (show ln)), Other "\n"
+  , Important "#", Important ("line"), Important (fromString (show ln)), Other "\n"
+  ]
 
 getCmd :: [TOKEN] -> Maybe String
 getCmd = aux . dropWhile notImportant
