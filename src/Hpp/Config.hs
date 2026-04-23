@@ -44,6 +44,22 @@ data ConfigF f = Config { curFileNameF        :: f FilePath
                         -- ^ Format string for @\_\_DATE\_\_@.
                         , prepTimeF           :: f TimeString
                         -- ^ Format string for @\_\_TIME\_\_@.
+                        , ignoreUnknownDirectivesF :: f Bool
+                        -- ^ Treat @#@-lines whose command is not a
+                        -- known directive as ordinary text, instead
+                        -- of raising an 'UnknownCommand' error. This
+                        -- mirrors the @-traditional-cpp@ behaviour of
+                        -- GNU cpp that GHC relies on when
+                        -- pre-processing Haskell sources.
+                        , ignoreHaskellCommentsF :: f Bool
+                        -- ^ Treat Haskell line comments (@-- …@) and
+                        -- nestable block comments (@{- … -}@) as
+                        -- opaque regions: any @#@ character inside
+                        -- one is rewritten to whitespace before
+                        -- directive detection, so multi-line
+                        -- @{-# LANGUAGE … #-}@ pragmas and stray @#@
+                        -- in comments do not confuse the directive
+                        -- parser.
                        }
 
 -- | A fully-populated configuration for the pre-processor.
@@ -60,9 +76,12 @@ realizeConfig (Config (Just fileName)
                       (Just inhibitLines)
                       (Just trigraphs)
                       (Just pdate)
-                      (Just ptime)) =
+                      (Just ptime)
+                      (Just ignoreUnknown)
+                      (Just ignoreHsCmts)) =
   Just (Config (pure fileName) (pure paths) (pure spliceLines) (pure comments)
-               (pure inhibitLines) (pure trigraphs) (pure pdate) (pure ptime))
+               (pure inhibitLines) (pure trigraphs) (pure pdate) (pure ptime)
+               (pure ignoreUnknown) (pure ignoreHsCmts))
 realizeConfig _ = Nothing
 
 -- | Extract the current file name from a configuration.
@@ -97,6 +116,16 @@ prepDate = runIdentity . prepDateF
 prepTime :: Config -> TimeString
 prepTime = runIdentity . prepTimeF
 
+-- | Determine whether unknown @#@-directives should be passed through
+-- as ordinary text instead of raising an error.
+ignoreUnknownDirectives :: Config -> Bool
+ignoreUnknownDirectives = runIdentity . ignoreUnknownDirectivesF
+
+-- | Determine whether Haskell comments should be treated as opaque
+-- regions when looking for directives.
+ignoreHaskellComments :: Config -> Bool
+ignoreHaskellComments = runIdentity . ignoreHaskellCommentsF
+
 -- | A default configuration with no current file name set. Note that
 -- long line splicing is enabled, C++-style comments are erased, #line
 -- markers are inhibited, and trigraph replacement is disabled.
@@ -105,6 +134,7 @@ defaultConfigF = Config Nothing (Just [])
                         (Just True) (Just True) (Just False) (Just False)
                         (Just (DateString "??? ?? ????"))
                         (Just (TimeString "??:??:??"))
+                        (Just False) (Just False)
 
 -- | Format a date according to the C spec.
 formatPrepDate :: UTCTime -> DateString
@@ -147,3 +177,13 @@ inhibitLinemarkersL f cfg = (\x -> cfg { inhibitLinemarkersF = pure x })
 replaceTrigraphsL :: Functor f => (Bool -> f Bool) -> Config -> f Config
 replaceTrigraphsL f cfg = (\x -> cfg { replaceTrigraphsF = pure x })
                           <$> f (replaceTrigraphs cfg)
+
+-- | Lens for the "ignore unknown directives" option.
+ignoreUnknownDirectivesL :: Functor f => (Bool -> f Bool) -> Config -> f Config
+ignoreUnknownDirectivesL f cfg = (\x -> cfg { ignoreUnknownDirectivesF = pure x })
+                                 <$> f (ignoreUnknownDirectives cfg)
+
+-- | Lens for the "ignore Haskell comments" option.
+ignoreHaskellCommentsL :: Functor f => (Bool -> f Bool) -> Config -> f Config
+ignoreHaskellCommentsL f cfg = (\x -> cfg { ignoreHaskellCommentsF = pure x })
+                               <$> f (ignoreHaskellComments cfg)

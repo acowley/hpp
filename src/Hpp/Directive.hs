@@ -8,7 +8,7 @@ import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Except
 import Control.Monad.Trans.State.Strict (StateT)
 import Hpp.Conditional (dropBranch, takeBranch)
-import Hpp.Config (curFileName, curFileNameF)
+import Hpp.Config (curFileName, curFileNameF, ignoreUnknownDirectives)
 import Hpp.Env (lookupKey, deleteKey, insertPair)
 import Hpp.Expansion (expandLineState)
 import Hpp.Expr (evalExpr, parseExpr)
@@ -153,10 +153,21 @@ directive = lift (onElements (awaitJust "directive")) >>= aux
                         throwError $ UserError ln (tokStr++" ("++curFile++")")
           "warning" -> True <$ lift dropLine -- warnings not yet supported
 
-          t -> do toks <- lift takeLine
-                  ln <- subtract 1 <$> use lineNum
-                  throwError $ UnknownCommand ln
-                    (toChars (detokenize (Important t:toks)))
+          t -> do cfg <- use config
+                  if ignoreUnknownDirectives cfg
+                    then
+                      -- Pass the line through as plain text. We have
+                      -- only consumed the command token 't' so far;
+                      -- returning False tells 'macroExpansion' to
+                      -- emit the original line and call 'takeLine'
+                      -- to advance the input — see the 'Important
+                      -- "#":rst' branch in 'macroExpansion'.
+                      pure False
+                    else do
+                      toks <- lift takeLine
+                      ln <- subtract 1 <$> use lineNum
+                      throwError $ UnknownCommand ln
+                        (toChars (detokenize (Important t:toks)))
         aux _ = error "Impossible unimportant directive"
         includeAux :: (LineNum -> FilePath -> HppT src (Parser m [TOKEN]) [String])
                    -> HppT src (Parser m [TOKEN]) ()

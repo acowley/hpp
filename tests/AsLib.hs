@@ -82,6 +82,15 @@ remove_comments = T.over T.config (T.setL C.eraseCCommentsL True)
 remove_line :: HppState -> HppState
 remove_line = T.over T.config (T.setL C.inhibitLinemarkersL True)
 
+-- | Pass unknown @#@-directives through as plain text instead of
+-- raising an error.
+ignoreUnknown :: HppState -> HppState
+ignoreUnknown = T.over T.config (T.setL C.ignoreUnknownDirectivesL True)
+
+-- | Treat Haskell comments as opaque when looking for directives.
+haskellComments :: HppState -> HppState
+haskellComments = T.over T.config (T.setL C.ignoreHaskellCommentsL True)
+
 add_definition :: ByteString -> ByteString -> HppState -> HppState
 add_definition k v s = fromMaybe (error "Preprocessor definition did not parse")
                                  (addDefinition k v s)
@@ -361,6 +370,184 @@ tests =
             [ "\"\" foo\n"
             , "\n"
             ]
+
+  -- ignoreUnknownDirectives: unknown '#'-commands pass through unchanged
+  -- (mirrors -traditional-cpp's permissive handling of Haskell pragmas
+  -- whose closing @#-}@ lands on its own line).
+  , hppHelper (ignoreUnknown $ remove_line emptyHppState)
+            [ "before"
+            , "  #-}"
+            , "after"
+            ]
+            [ "before\n"
+            , "  #-}\n"
+            , "after\n"
+            , "\n"
+            ]
+
+  -- Known directives are still processed when the option is on.
+  , hppHelper (ignoreUnknown $ remove_line $ add_definition "FOO" "1" emptyHppState)
+            sourceIfdef ["x = 42\n","\n"]
+
+  -- ignoreHaskellComments: the closing brace of a multi-line Haskell
+  -- pragma ('  #-}') begins inside an open '{-' block comment. The
+  -- gating pass demotes the leading '#' token so directive dispatch
+  -- skips it, and the bytes are emitted unchanged.
+  , hppHelper (haskellComments $ remove_line emptyHppState)
+            [ "{-# LANGUAGE CPP"
+            , "           , OverloadedStrings"
+            , "  #-}"
+            , "module M where"
+            , "x = 1"
+            ]
+            [ "{-# LANGUAGE CPP\n"
+            , "           , OverloadedStrings\n"
+            , "  #-}\n"
+            , "module M where\n"
+            , "x = 1\n"
+            , "\n"
+            ]
+
+  -- Nested block comments are tracked: an inner '{-' inside an outer
+  -- '{-' bumps the depth so a single '-}' stays inside the outermost
+  -- comment and the '#-}' line remains gated.
+  , hppHelper (haskellComments $ remove_line emptyHppState)
+            [ "{- outer {- inner"
+            , "  #-}"
+            , "  still in outer -}"
+            , "-}"
+            , "x = 1"
+            ]
+            [ "{- outer {- inner\n"
+            , "  #-}\n"
+            , "  still in outer -}\n"
+            , "-}\n"
+            , "x = 1\n"
+            , "\n"
+            ]
+
+  -- A '{-' appearing inside a string literal should not open a
+  -- Haskell block comment, so the directive that follows is still
+  -- dispatched normally.
+  , hppHelper (haskellComments $ add_definition "FOO" "1"
+               $ remove_line emptyHppState)
+            [ "s = \"{- not a comment -}\""
+            , "#ifdef FOO"
+            , "y = 42"
+            , "#endif"
+            ]
+            [ "s = \"{- not a comment -}\"\n"
+            , "y = 42\n"
+            , "\n"
+            ]
+
+  -- A multi-line Haskell string literal continued via the
+  -- backslash-gap syntax ('\' at end of one line, '\' at the start
+  -- of the next) keeps HsString state alive across lines. A '{-'
+  -- written inside such a string must not open a Haskell block
+  -- comment — otherwise the open comment would persist past the
+  -- closing '"' and demote the leading '#' of the following
+  -- directive, leaving '#ifdef FOO' to pass through as plain text.
+  -- This test uses 'defaultCfg' so that 'spliceLongLines' is off
+  -- and the '\' line endings reach 'gateHaskellComments' intact.
+  , hppHelper (haskellComments . remove_line . add_definition "FOO" "1"
+              $ defaultCfg)
+            [ "s = \"open {- gap \\"
+            , "    \\ end\""
+            , "#ifdef FOO"
+            , "y = 42"
+            , "#endif"
+            ]
+            [ "s = \"open {- gap \\\n"
+            , "    \\ end\"\n"
+            , "y = 42\n"
+            ]
+
+  -- Same scenario, but the '{-' appears on the /second/ line of the
+  -- multi-line string (after the gap closes). The string was opened
+  -- on the first line, so HsString state must be carried across the
+  -- gap into the second line — otherwise a fresh HsCode walk would
+  -- see '{-' open an unclosed block comment and the trailing
+  -- '#ifdef FOO' would be demoted to plain text.
+  , hppHelper (haskellComments . remove_line . add_definition "FOO" "1"
+              $ defaultCfg)
+            [ "s = \"first \\"
+            , "    \\ {- still in string \\"
+            , "    \\ end\""
+            , "#ifdef FOO"
+            , "y = 42"
+            , "#endif"
+            ]
+            [ "s = \"first \\\n"
+            , "    \\ {- still in string \\\n"
+            , "    \\ end\"\n"
+            , "y = 42\n"
+            ]
+
+  -- GHC's MultilineStrings extension: a literal opens with '"""' and
+  -- closes at the next '"""', and may span many lines. The body of a
+  -- multi-line string can contain text that looks like a directive
+  -- ('#define INSIDE 1' below) — that line must pass through as
+  -- string content rather than dispatch as a directive. As a
+  -- corollary, INSIDE must NOT be defined: the bare 'INSIDE' that
+  -- appears after the closing '"""' is expected to remain
+  -- unexpanded. A real '#define FOO 42' after the string then
+  -- dispatches normally and 'FOO' expands to 42 — proving the
+  -- closing '"""' returned the state machine to HsCode.
+  , hppHelper (haskellComments . remove_line $ defaultCfg)
+            [ "before"
+            , "s = \"\"\""
+            , "#define INSIDE 1"
+            , "still in string"
+            , "\"\"\""
+            , "INSIDE"
+            , "#define FOO 42"
+            , "FOO"
+            ]
+            [ "before\n"
+            , "s = \"\"\"\n"
+            , "#define INSIDE 1\n"
+            , "still in string\n"
+            , "\"\"\"\n"
+            , "INSIDE\n"
+            , "42\n"
+            ]
+
+  -- A '{-' inside a multi-line string must not open a Haskell block
+  -- comment, and a '#ifdef'/'#endif' pair inside one must not run
+  -- conditional skipping. Without proper '"""' tracking the opening
+  -- 'foo = """' would walk as three single-quote toggles and end in
+  -- HsString rather than HsMultiString; the body's '#ifdef
+  -- NEVER_DEFINED' would then dispatch (HsString does not gate
+  -- '#'), the false branch would swallow 'would skip', and the
+  -- output would be missing the body lines.
+  , hppHelper (haskellComments . remove_line $ defaultCfg)
+            [ "foo = \"\"\""
+            , "{- not a comment"
+            , "#ifdef NEVER_DEFINED"
+            , "would skip"
+            , "#endif"
+            , "-}"
+            , "\"\"\""
+            , "after"
+            ]
+            [ "foo = \"\"\"\n"
+            , "{- not a comment\n"
+            , "#ifdef NEVER_DEFINED\n"
+            , "would skip\n"
+            , "#endif\n"
+            , "-}\n"
+            , "\"\"\"\n"
+            , "after\n"
+            ]
+
+  -- Outside a Haskell block comment, a regular '#'-prefixed line is
+  -- still dispatched as a directive even with ignoreHaskellComments
+  -- on. (Sanity check: the gate only fires on lines that begin inside
+  -- an open block comment.)
+  , hppHelper (haskellComments $ remove_line
+               $ add_definition "FOO" "1" emptyHppState)
+            sourceIfdef ["x = 42\n","\n"]
 
   ]
 
