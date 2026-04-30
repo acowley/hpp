@@ -328,6 +328,23 @@ tests =
         ["#include \"sub/outer.h\""]
         (any (BS.isInfixOf "inner_marker"))
 
+  -- A @#line N@ directive must make the immediately following
+  -- input line expand __LINE__ to N (not N+1). The line-counter
+  -- semantics here are load-bearing for any caller that resets
+  -- lineNum mid-stream — see Note [Resetting __LINE__ after the
+  -- CLI prelude] in pkg:Hpp.CmdLine.
+  , hppHelper (remove_line emptyHppState)
+            [ "ignored line"
+            , "#line 1 \"main.c\""
+            , "__LINE__"        -- → must report 1
+            , "__LINE__"        -- → must report 2
+            ]
+            [ "ignored line\n"
+            , "1\n"
+            , "2\n"
+            , "\n"
+            ]
+
   ]
 
 main :: IO ()
