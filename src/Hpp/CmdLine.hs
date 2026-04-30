@@ -9,7 +9,7 @@ import Hpp
 import Hpp.Config
 import Hpp.Env (deleteKey, emptyEnv, insertPair)
 import Hpp.StringSig (readLines, putStringy)
-import Hpp.Types (Env, Error(..))
+import Hpp.Types (Env, Error(..), setL, lineNum)
 import System.Directory (doesFileExist, makeAbsolute)
 import System.IO (openFile, IOMode(..), hClose, stdout)
 
@@ -114,12 +114,56 @@ runWithArgs args =
                                     flip openFile WriteMode
                                return ( \os -> mapM_ (putStringy h) os
                                       , hClose h )
-     result <- readLines fileName
-           >>= runExceptT
-               . streamHpp (initHppState cfg' env) snk
-               . preprocess
-               . (map fromString lns ++)
+     -- See Note [Resetting __LINE__ after the CLI prelude]
+     srcLines <- readLines fileName
+     result <- runExceptT $ do
+                 let st0 = initHppState cfg' env
+                 (_, st1) <- streamHpp st0 snk
+                                 (preprocess (map fromString lns))
+                 let st2 = setL lineNum 1 st1
+                 streamHpp st2 snk (preprocess srcLines)
      closeSnk
      case result of
        Left err -> return $ Just err
        _ -> return Nothing
+
+-- Note [Resetting __LINE__ after the CLI prelude]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+-- The command-line driver builds up a small prelude from -D, -U and
+-- -include options and would otherwise prepend it verbatim to the
+-- user's source. For example,
+--
+--     hpp -D FOO=1 -include foo.h main.c
+--
+-- yields a synthetic prelude:
+--
+--     #define FOO 1
+--     #include "foo.h"
+--
+-- Naïvely concatenating the prelude with main.c and feeding the lot
+-- through 'preprocess' breaks line counting in two reinforcing ways:
+--
+--   1. The preprocessor's lineNum advances one per source line as it
+--      is consumed, including the prelude. The user's first line ends
+--      up at lineNum N+1 for an N-line prelude.
+--
+--   2. The C-comment-removal pass ('cCommentRemoval') sits in front of
+--      directive dispatch and emits @#line K@ markers based on the
+--      position of multi-line @/\*…\*\/@ blocks in the /combined/ input
+--      stream. Those markers are off by N from the user's source line
+--      numbers — and the offset is then baked into every subsequent
+--      __LINE__ expansion.
+--
+-- The user-visible symptom is __LINE__ off by some N >= 1 for any
+-- file that uses -include, with the off-by growing if a leading
+-- block comment shifts cCommentRemoval's idea of "where the user's
+-- code starts". MCPP test n_28.c fires assert(__LINE__ == 19) on its
+-- own line 19 and trips the moment -include is added.
+--
+-- The fix is to drive the prelude and the user's source through two
+-- separate streamHpp invocations. The prelude pass establishes the
+-- macro environment and any included files; we then reset
+-- @lineNum@ to 1 in the captured state and run the user's source on
+-- its own. cCommentRemoval restarts at curLine=1 for the source pass
+-- (see 'preprocess' in pkg:Hpp.RunHpp), and __LINE__ matches the
+-- physical source line the user can see in their editor.
