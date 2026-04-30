@@ -269,6 +269,30 @@ tests =
             , "#line 17\n"
             ]
 
+  -- Empty trailing argument: glibc's mathcalls.h relies on this when
+  -- it expands @__MATHDECL_ALIAS@ into @__MATH_PRECNAME(name,)@. The
+  -- second argument is intentionally empty, and the macro must still
+  -- see /two/ arguments rather than collapsing to one.
+  , hppHelper (remove_line emptyHppState)
+            [ "#define PAIR(a,b) [a|b]"
+            , "PAIR(x,)"
+            ]
+            [ "[x|]\n"
+            , "\n"
+            ]
+
+  -- Empty leading argument and empty middle argument also matter:
+  -- @M(,b)@ → 2 args (first empty), @M(a,,c)@ → 3 args (middle empty).
+  , hppHelper (remove_line emptyHppState)
+            [ "#define TRIO(a,b,c) [a|b|c]"
+            , "TRIO(,b,)"
+            , "TRIO(a,,c)"
+            ]
+            [ "[|b|]\n"
+            , "[a||c]\n"
+            , "\n"
+            ]
+
   ]
 
 main :: IO ()
