@@ -115,10 +115,17 @@ instance Stringy B.ByteString where
                    Nothing -> s'
                    Just (ini, c) -> if c == '"' then ini else s'
   {-# INLINE unquote #-}
-  trimSpaces s = let go !i = if isSpace (B.index s i)
-                             then go (i-1)
-                             else B.length s - i - 1
-                 in B.drop (go (B.length s - 1)) s
+#if MIN_VERSION_bytestring(0,10,12)
+  trimSpaces = B.dropWhileEnd isSpace
+#else
+  -- bytestring < 0.10.12 (e.g. the version that ships with GHC 8.8.4)
+  -- doesn't expose dropWhileEnd. Inline the equivalent: walk back from
+  -- the end counting trailing matches, then take everything before the
+  -- last non-matching byte.
+  trimSpaces s = B.take (go (B.length s)) s
+    where go 0  = 0
+          go !n = if isSpace (B.index s (n-1)) then go (n-1) else n
+#endif
   {-# INLINE trimSpaces #-}
   breakOn [!(!n1,!t1)] haystack =
     case B.breakSubstring n1 haystack of
