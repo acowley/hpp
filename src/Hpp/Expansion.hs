@@ -97,7 +97,12 @@ appParse = droppingWhile isSpaceScan >> checkApp
         getArg acc = do arg <- fmap trimScan argParse
                         tok <- awaitJust "appParse getArg"
                         case unscan tok of
+                          -- 'argParse' leaves both ')' and ',' on the
+                          -- stream so an empty trailing argument
+                          -- (e.g. @M(a,)@ or @M(a,,b)@) yields an
+                          -- explicit empty list rather than vanishing.
                           Just (Important ")") -> return (acc [arg])
+                          Just (Important ",") -> getArg (acc . (arg:))
                           _ -> replace tok >> getArg (acc . (arg:))
         goApp = do
           tok <- awaitJust "appParse goApp"
@@ -106,16 +111,17 @@ appParse = droppingWhile isSpaceScan >> checkApp
             Just (Important ")") -> return (Just [])
             _ -> replace tok >> fmap Just (getArg id)
 
--- | Emit the tokens of a single argument. Returns 'True' if this is
--- the final argument in an application (indicated by an unbalanced
--- closing parenthesis.
+-- | Emit the tokens of a single argument. The argument terminator
+-- (either @,@ or the closing @)@) is left on the stream for the
+-- caller — this is what lets 'getArg' tell @M(a)@ apart from
+-- @M(a,)@.
 argParse :: (Monad m, HasError m) => ParserT m src Scan [Scan]
 argParse = go id
   where go acc = do tok <- awaitJust "argParse"
                     case unscan tok of
                       Just (Important s)
                         | s == ")" -> replace tok >> return (acc [])
-                        | s == "," -> return (acc [])
+                        | s == "," -> replace tok >> return (acc [])
                         | s == "(" -> do ts <- fmap (tok:) parenthetical
                                          go (acc . (ts++))
                         | otherwise -> go (acc . (tok:))
