@@ -18,6 +18,7 @@ import Hpp.StringSig (unquote, toChars)
 import Hpp.Tokens (newLine, notImportant, trimUnimportant, detokenize, isImportant, Token(..))
 import Hpp.Types
 import Hpp.Parser (replace, await, insertInputSegment, takingWhile, droppingWhile, onInputSegment, evalParse, onElements, awaitJust, ParserT, Parser)
+import System.FilePath (takeDirectory)
 import Text.Read (readMaybe)
 import Prelude hiding (String)
 
@@ -46,20 +47,35 @@ droppingSpaces ::(Monad m) => ParserT m src TOKEN ()
 droppingSpaces = droppingWhile notImportant
 
 -- | Run a Stream with a configuration for a new file.
+--
+-- Both 'curFileName' and 'dir' are switched to the new file: the
+-- directory tracks the file currently being preprocessed so quoted
+-- @#include "rel/path.h"@ directives nested inside @fp@ resolve
+-- relative to @fp@'s own directory (C99 §6.10.2 "in a manner that
+-- depends on the implementation"; gcc/clang look in the directory
+-- of the file containing the @#include@). Without this, an included
+-- file living in a subdirectory of the search path could not refer to
+-- siblings via a quoted include — those would be searched only
+-- relative to the original input's directory and the configured
+-- include paths, never under the includer's own subdirectory.
 streamNewFile :: (Monad m, HasHppState m)
               => FilePath -> [[TOKEN]] -> Parser m [TOKEN] ()
 streamNewFile fp s =
-  do (oldCfg,oldLine) <- do st <- getState
-                            let cfg = hppConfig st
-                                cfg' = cfg { curFileNameF = pure fp }
-                                ln = hppLineNum st
-                            -- NOTE: We should *NOT* use a the config lens here
-                            --       because it will mutate the directory which
-                            --       we *don't* want in this instance.
-                            setState (st {hppConfig = cfg', hppLineNum = 1})
-                            return (cfg, ln)
+  do (oldCfg,oldDir,oldLine) <- do st <- getState
+                                   let cfg    = hppConfig st
+                                       cfg'   = cfg { curFileNameF = pure fp }
+                                       oldDir = hppCurDir st
+                                       ln     = hppLineNum st
+                                       newDir = takeDirectory fp
+                                   setState (st { hppConfig  = cfg'
+                                                , hppCurDir  = newDir
+                                                , hppLineNum = 1
+                                                })
+                                   return (cfg, oldDir, ln)
      insertInputSegment
-       s (getState >>= setState . setL lineNum oldLine . setL config oldCfg)
+       s (getState >>= setState . setL lineNum oldLine
+                                . setL config oldCfg
+                                . setL dir oldDir)
 
 -- | Handle preprocessor directives (commands prefixed with an octothorpe).
 directive :: forall m. (Monad m, HasError m, HasHppState m, HasEnv m)

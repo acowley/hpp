@@ -2,6 +2,7 @@
 {-# LANGUAGE CPP #-}
 import Control.Monad.Trans.Except
 import Data.ByteString.Char8 (ByteString)
+import qualified Data.ByteString.Char8 as BS
 import Data.Maybe (fromMaybe)
 import Hpp
 import qualified Hpp.Config as C
@@ -11,6 +12,7 @@ import qualified Hpp.Types as T
 import Data.Monoid ((<>))
 #endif
 
+import System.Directory (withCurrentDirectory)
 import System.Exit
 
 sourceIfdef :: [ByteString]
@@ -37,6 +39,21 @@ hppHelper st src expected =
                       else do putStrLn ("Expected: "++show expected)
                               putStrLn ("Got:      "++show (hppOutput res))
                               return False
+
+-- | File-based variant of 'hppHelper': runs 'runHpp' (which performs IO
+-- to read included files) and checks that the predicate holds on the
+-- emitted output. Used to exercise paths that 'expand' skips, e.g.
+-- @#include "..."@ resolution.
+hppFileHelper :: HppState -> [ByteString] -> ([ByteString] -> Bool) -> IO Bool
+hppFileHelper st src ok = do
+  r <- runExceptT (runHpp st (preprocess src))
+  case r of
+    Left e -> putStrLn ("Error running hpp: " ++ show e) >> return False
+    Right (res, _) ->
+      if ok (hppOutput res)
+        then return True
+        else do putStrLn ("Got: " ++ show (hppOutput res))
+                return False
 
 sourceCommentsAndSplice :: [ByteString]
 sourceCommentsAndSplice =
@@ -292,6 +309,24 @@ tests =
             , "[a||c]\n"
             , "\n"
             ]
+
+  -- Quoted nested includes resolve relative to the includer's
+  -- directory. The fixture in tests/include-data has:
+  --
+  --   sub/outer.h    -- contains  #include "inner.h"
+  --   sub/inner.h    -- contains  inner_marker
+  --
+  -- The test cd's into tests/include-data and feeds an initial
+  -- @#include "sub/outer.h"@. Once outer.h is being preprocessed,
+  -- its sibling @#include "inner.h"@ has to resolve through the
+  -- current-file directory @sub@: without the per-file directory
+  -- tracking it would only be searched relative to the original
+  -- input's directory and never find inner.h.
+  , withCurrentDirectory "tests/include-data" $
+      hppFileHelper
+        (remove_line emptyHppState)
+        ["#include \"sub/outer.h\""]
+        (any (BS.isInfixOf "inner_marker"))
 
   ]
 
