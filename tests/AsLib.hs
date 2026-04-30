@@ -345,6 +345,23 @@ tests =
             , "\n"
             ]
 
+  -- Stringifying an empty (or empty-bodied) argument used to crash
+  -- with @Data.ByteString.index: negative index: -1@: 'trimSpaces'
+  -- read past the start of an empty bytestring while looking for
+  -- trailing whitespace. The exposure path that surfaced this in
+  -- glibc was @__ASMNAME(__USER_LABEL_PREFIX__, name)@, where the
+  -- predefined @__USER_LABEL_PREFIX__@ is empty and the helper
+  -- macro stringifies it: @#x@ on an empty arg should yield @""@.
+  , hppHelper (remove_line emptyHppState)
+            [ "#define EMPTY "
+            , "#define STR(x) #x"
+            , "#define M(a, b) STR(a) b"
+            , "M(EMPTY, foo)"
+            ]
+            [ "\"\" foo\n"
+            , "\n"
+            ]
+
   ]
 
 main :: IO ()
