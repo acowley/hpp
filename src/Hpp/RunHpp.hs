@@ -90,7 +90,30 @@ runHpp source sink m = runHppT m >>= go []
           Left . (, IncludeDoesNotExist ln (stripAngleBrackets file))
                . curFileName <$> use config
         readAux files _ln _file k (Just file') =
-          source file' >>= runHppT . k >>= go files
+          source file' >>= runHppT . k file' >>= go files
+
+-- Note [Resolved-path tracking for nested includes]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+-- C99 §6.10.2 says that for a quoted @#include "rel/path.h"@ the
+-- implementation defines what counts as the "source file's
+-- directory" for the relative lookup. gcc/clang use the directory
+-- of the file containing the directive — that is, of the file
+-- /currently being preprocessed/.
+--
+-- We track that as 'hppCurDir' and update it on entry to a nested
+-- include in 'Hpp.Directive.streamNewFile'. Crucially, the value
+-- we want is the directory of the file we /actually opened/, not
+-- the directory of the textual @#include@ argument. Those differ
+-- whenever the include is resolved off the search path: a header
+-- whose textual form is e.g. @"MachRegs.h"@ may live at
+-- @<some-include-path>/stg/MachRegs.h@.
+--
+-- To make the resolved path available to 'streamNewFile', the
+-- 'ReadFile' / 'ReadNext' continuations of 'HppF' carry the
+-- resolved 'FilePath' alongside the file contents. 'searchForInclude'
+-- in this module is the one place that knows the resolved path,
+-- and we feed it directly into the continuation here at the call
+-- to @k file'@.
 {-# SPECIALIZE runHpp ::
     (FilePath -> Parser (StateT HppState (ExceptT Error IO)) [TOKEN] [String])
  -> ([String] -> Parser (StateT HppState (ExceptT Error IO)) [TOKEN] ())
@@ -111,8 +134,12 @@ expandHpp sink m = runHppT m >>= go []
            -> m (Either (FilePath, Error) (HppResult a))
         go files (PureF x) = pure $ Right (HppResult files x)
         go files (FreeF s) = case s of
-          ReadFile _ln file k -> runHppT (k mempty) >>= go (file:files)
-          ReadNext _ln file k -> runHppT (k mempty) >>= go (file:files)
+          -- 'expandHpp' never opens included files, so there is no
+          -- "resolved path" to feed back. Pass the textual @#include@
+          -- argument as a stand-in: the continuation gets a /mempty/
+          -- body anyway, so the path it sees is not load-bearing.
+          ReadFile _ln file k -> runHppT (k file mempty) >>= go (file:files)
+          ReadNext _ln file k -> runHppT (k file mempty) >>= go (file:files)
           WriteOutput output k -> sink output >> runHppT k >>= go files
 {-# SPECIALIZE expandHpp ::
     ([String] -> Parser (StateT HppState
