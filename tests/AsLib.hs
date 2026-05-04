@@ -82,6 +82,11 @@ remove_comments = T.over T.config (T.setL C.eraseCCommentsL True)
 remove_line :: HppState -> HppState
 remove_line = T.over T.config (T.setL C.inhibitLinemarkersL True)
 
+-- | Override the include search path on an 'HppState'.
+with_include_paths :: [FilePath] -> HppState -> HppState
+with_include_paths ps =
+  T.over T.config (\c -> c { C.includePathsF = pure ps })
+
 -- | Pass unknown @#@-directives through as plain text instead of
 -- raising an error.
 ignoreUnknown :: HppState -> HppState
@@ -336,6 +341,31 @@ tests =
         (remove_line emptyHppState)
         ["#include \"sub/outer.h\""]
         (any (BS.isInfixOf "inner_marker"))
+
+  -- Quoted nested includes work even when the /includer/ was
+  -- resolved off the include search path (not the input's cwd).
+  -- This is the GHC RTS scenario: a top-level @#include
+  -- <stg/MachRegsForHost.h>@ finds the file under an include
+  -- path; that file then does @#include "MachRegs.h"@ to refer
+  -- to a sibling, and @MachRegs.h@ in turn does @#include
+  -- "MachRegs/x86.h"@ to reach a subdirectory.
+  --
+  -- The fixture in tests/include-data is:
+  --
+  --   inc/stg/MachRegsForHost.h  -- #include "MachRegs.h"
+  --   inc/stg/MachRegs.h         -- #include "MachRegs/x86.h"
+  --   inc/stg/MachRegs/x86.h     -- deep_marker
+  --
+  -- The includer's directory must be the /resolved/ on-disk path
+  -- (@inc/stg/@), not the textual @#include@ argument
+  -- (@stg/MachRegsForHost.h@) — otherwise the chained relative
+  -- includes fall off the end of every search path and fail with
+  -- IncludeDoesNotExist on @MachRegs/x86.h@.
+  , withCurrentDirectory "tests/include-data" $
+      hppFileHelper
+        (with_include_paths ["inc"] $ remove_line emptyHppState)
+        ["#include <stg/MachRegsForHost.h>"]
+        (any (BS.isInfixOf "deep_marker"))
 
   -- A @#line N@ directive must make the immediately following
   -- input line expand __LINE__ to N (not N+1). The line-counter

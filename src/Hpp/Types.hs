@@ -98,13 +98,20 @@ data HppState = HppState { hppConfig :: Config
 
 -- | A free monad construction to strictly delimit what capabilities
 -- we need to perform pre-processing.
-data HppF t r = ReadFile Int FilePath (t -> r)
-              | ReadNext Int FilePath (t -> r)
+--
+-- The continuations of 'ReadFile' and 'ReadNext' receive both the
+-- /resolved/ path of the included file (after include-path search)
+-- and its contents. The resolved path is what the includer's
+-- directory should be set to when entering the file — see
+-- 'Hpp.Directive.streamNewFile' and Note [Resolved-path tracking
+-- for nested includes] in pkg:Hpp.RunHpp.
+data HppF t r = ReadFile Int FilePath (FilePath -> t -> r)
+              | ReadNext Int FilePath (FilePath -> t -> r)
               | WriteOutput t r
 
 instance Functor (HppF t) where
-  fmap f (ReadFile ln file k) = ReadFile ln file (f . k)
-  fmap f (ReadNext ln file k) = ReadNext ln file (f . k)
+  fmap f (ReadFile ln file k) = ReadFile ln file (\fp t -> f (k fp t))
+  fmap f (ReadNext ln file k) = ReadNext ln file (\fp t -> f (k fp t))
   fmap f (WriteOutput o k) = WriteOutput o (f k)
   {-# INLINE fmap #-}
 
@@ -117,15 +124,17 @@ type Hpp t = FreeF (HppF t)
 newtype HppT t m a = HppT { runHppT :: m (Hpp t a (HppT t m a)) }
 
 -- | @hppReadFile lineNumber fileName@ introduces an @#include
--- <fileName>@ at the given line number.
-hppReadFile :: Monad m => Int -> FilePath -> HppT src m src
-hppReadFile n file = HppT (pure (FreeF (ReadFile n file return)))
+-- <fileName>@ at the given line number. Returns the resolved path
+-- of the included file along with its contents.
+hppReadFile :: Monad m => Int -> FilePath -> HppT src m (FilePath, src)
+hppReadFile n file = HppT (pure (FreeF (ReadFile n file (\fp s -> return (fp, s)))))
 {-# INLINE hppReadFile #-}
 
 -- | @hppReadNext lineNumber fileName@ introduces an @#include_next
--- <fileName>@ at the given line number.
-hppReadNext :: Monad m => Int -> FilePath -> HppT src m src
-hppReadNext n file = HppT (pure (FreeF (ReadNext n file return)))
+-- <fileName>@ at the given line number. Returns the resolved path
+-- of the included file along with its contents.
+hppReadNext :: Monad m => Int -> FilePath -> HppT src m (FilePath, src)
+hppReadNext n file = HppT (pure (FreeF (ReadNext n file (\fp s -> return (fp, s)))))
 {-# INLINE hppReadNext #-}
 
 hppWriteOutput :: Monad m => t -> HppT t m ()

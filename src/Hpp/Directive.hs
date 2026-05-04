@@ -58,6 +58,13 @@ droppingSpaces = droppingWhile notImportant
 -- siblings via a quoted include — those would be searched only
 -- relative to the original input's directory and the configured
 -- include paths, never under the includer's own subdirectory.
+--
+-- @fp@ must be the /resolved/ path to the file being entered (the
+-- one the include search actually located on disk), not the textual
+-- @#include@ argument. Callers in 'includeAux' obtain it from
+-- 'hppReadFile' / 'hppReadNext' which thread it back from
+-- 'searchForInclude'. See Note [Resolved-path tracking for nested
+-- includes] in pkg:Hpp.RunHpp.
 streamNewFile :: (Monad m, HasHppState m)
               => FilePath -> [[TOKEN]] -> Parser m [TOKEN] ()
 streamNewFile fp s =
@@ -169,17 +176,19 @@ directive = lift (onElements (awaitJust "directive")) >>= aux
                       throwError $ UnknownCommand ln
                         (toChars (detokenize (Important t:toks)))
         aux _ = error "Impossible unimportant directive"
-        includeAux :: (LineNum -> FilePath -> HppT src (Parser m [TOKEN]) [String])
+        includeAux :: (LineNum -> FilePath -> HppT src (Parser m [TOKEN]) (FilePath, [String]))
                    -> HppT src (Parser m [TOKEN]) ()
         includeAux readFun =
           do fileName <- lift (toChars . detokenize . trimUnimportant . init
                                <$> expandLineState)
              ln <- use lineNum
-             src <- prepareInput <*> readFun ln fileName
+             prep <- prepareInput
+             (resolvedPath, content) <- readFun ln fileName
+             let src = prep content
              lineNum .= ln+1
-             lift (streamNewFile (unquote fileName) src)
+             lift (streamNewFile resolvedPath src)
         {- SPECIALIZE includeAux ::
-            (LineNum -> FilePath -> HppT [String] (Parser (StateT HppState (ExceptT Error IO)) [TOKEN]) [String])
+            (LineNum -> FilePath -> HppT [String] (Parser (StateT HppState (ExceptT Error IO)) [TOKEN]) (FilePath, [String]))
             -> HppT [String] (Parser (StateT HppState (ExceptT Error IO)) [TOKEN]) () #-}
         ifAux =
           do toks <- lift (onElements droppingSpaces >> takeLine)
