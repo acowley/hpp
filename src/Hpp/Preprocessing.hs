@@ -224,6 +224,23 @@ gateHaskellComments = go HsCode
           (pos+2, HsBlockCmt 1) : aux (HsBlockCmt 1) (pos+2) rest
         aux HsCode pos ('-':'-':rest)             =
           (pos+2, HsLineCmt) : aux HsLineCmt (pos+2) rest
+        -- Haskell character literals. Match conservatively — the
+        -- two-char-body and one-char-body forms — and let longer
+        -- escapes ('\NUL', '\xFF', '\123', etc.) fall through to be
+        -- consumed character-by-character. That fallback is harmless
+        -- in HsCode because the escape's interior characters never
+        -- introduce a comment / string state on their own. The point
+        -- of these patterns is to keep the closing @"@ in a literal
+        -- like @'"'@ from accidentally entering HsString — see line
+        -- @_quotedbl = '"'@ in filepath's System.FilePath.Internal.
+        --
+        -- Order matters: the four-char form must precede the
+        -- three-char one so that @'\''@ is matched as a complete
+        -- escape rather than as @''@ followed by @'@.
+        aux HsCode pos ('\'':'\\':_:'\'':rest)    =
+          aux HsCode (pos+4) rest
+        aux HsCode pos ('\'':_:'\'':rest)         =
+          aux HsCode (pos+3) rest
         -- The triple-quote pattern must precede the single-quote
         -- one: Haskell pattern matching is order-sensitive and a
         -- leading @\"@ would otherwise win and start a regular
