@@ -2,7 +2,8 @@
              ScopedTypeVariables, TupleSections, ViewPatterns #-}
 -- | Mid-level interface to the pre-processor.
 module Hpp.RunHpp (preprocess, runHpp, expandHpp,
-                   hppIOSink, hppIO, HppResult(..)) where
+                   hppIOSink, hppIO,
+                   HppResult(..), IncludedFile(..)) where
 import Control.Exception (throwIO)
 import Control.Monad ((>=>))
 import Control.Monad.Trans.Class (lift)
@@ -55,7 +56,29 @@ searchForNextInclude curDir paths =
 
 -- * Running an Hpp Action
 
-data HppResult a = HppResult { hppFilesRead :: [FilePath]
+-- | One file referenced through a @#include@ / @#include_next@
+-- directive. Both representations are retained:
+--
+--   * 'ifInclude' is the textual @#include@ argument exactly as it
+--     appeared in the source after macro expansion — including the
+--     @\<…\>@ or @\"…\"@ delimiters. Useful for reporting / diff
+--     output that wants to echo the original spelling.
+--
+--   * 'ifPath' is the absolute on-disk path 'searchForInclude' (or
+--     'searchForNextInclude') actually located, suitable for
+--     filesystem operations, build-graph dependency tracking, and
+--     attribution back to whichever include-search directory served
+--     the lookup. The IO-less 'expandHpp' variant never opens
+--     included files, so it leaves 'ifPath' empty — @null . ifPath@
+--     is the canonical "this entry has no on-disk resolution"
+--     predicate.
+data IncludedFile = IncludedFile
+  { ifInclude :: !FilePath
+  , ifPath    :: !FilePath
+  }
+  deriving (Eq, Show)
+
+data HppResult a = HppResult { hppFilesRead :: [IncludedFile]
                              , hppResult :: a }
 
 -- | Interpret the IO components of the preprocessor. This
@@ -67,7 +90,7 @@ runHpp :: forall m a src. (MonadIO m, HasHppState m)
        -> HppT src m a
        -> m (Either (FilePath,Error) (HppResult a))
 runHpp source sink m = runHppT m >>= go []
-  where go :: [FilePath]
+  where go :: [IncludedFile]
            -> FreeF (HppF src) a (HppT src m a)
            -> m (Either (FilePath, Error) (HppResult a))
         go files (PureF x) = return $ Right (HppResult files x)
@@ -77,20 +100,21 @@ runHpp source sink m = runHppT m >>= go []
             curDir <- use dir
             let ipaths = includePaths cfg
             mFound <- liftIO $ searchForInclude curDir ipaths file
-            readAux (file:files) ln file k mFound
+            readAux files ln file k mFound
           ReadNext ln file k -> do
             cfg    <- use config
             curDir <- use dir
             let ipaths = includePaths cfg
             mFound <- liftIO $ searchForNextInclude curDir ipaths file
-            readAux (file:files) ln file k mFound
+            readAux files ln file k mFound
           WriteOutput output k -> sink output >> runHppT k >>= go files
 
         readAux _files ln file _ Nothing =
           Left . (, IncludeDoesNotExist ln (stripAngleBrackets file))
                . curFileName <$> use config
-        readAux files _ln _file k (Just file') =
-          source file' >>= runHppT . k file' >>= go files
+        readAux files _ln file k (Just file') =
+          let entry = IncludedFile { ifInclude = file, ifPath = file' }
+          in source file' >>= runHppT . k file' >>= go (entry:files)
 
 -- Note [Resolved-path tracking for nested includes]
 -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -129,17 +153,24 @@ expandHpp :: forall m a src. (Monad m, HasHppState m, Monoid src)
           -> HppT src m a
           -> m (Either (FilePath,Error) (HppResult a))
 expandHpp sink m = runHppT m >>= go []
-  where go :: [FilePath]
+  where go :: [IncludedFile]
            -> FreeF (HppF src) a (HppT src m a)
            -> m (Either (FilePath, Error) (HppResult a))
         go files (PureF x) = pure $ Right (HppResult files x)
         go files (FreeF s) = case s of
           -- 'expandHpp' never opens included files, so there is no
-          -- "resolved path" to feed back. Pass the textual @#include@
-          -- argument as a stand-in: the continuation gets a /mempty/
-          -- body anyway, so the path it sees is not load-bearing.
-          ReadFile _ln file k -> runHppT (k file mempty) >>= go (file:files)
-          ReadNext _ln file k -> runHppT (k file mempty) >>= go (file:files)
+          -- resolved path to record. Leave 'ifPath' empty to mark
+          -- the absence explicitly — callers that distinguish the
+          -- two paths can use @null . ifPath@ as a "this entry has
+          -- no on-disk resolution" predicate. The continuation gets
+          -- a /mempty/ body, so the path it sees is not load-
+          -- bearing.
+          ReadFile _ln file k ->
+            let entry = IncludedFile { ifInclude = file, ifPath = "" }
+            in runHppT (k file mempty) >>= go (entry:files)
+          ReadNext _ln file k ->
+            let entry = IncludedFile { ifInclude = file, ifPath = "" }
+            in runHppT (k file mempty) >>= go (entry:files)
           WriteOutput output k -> sink output >> runHppT k >>= go files
 {-# SPECIALIZE expandHpp ::
     ([String] -> Parser (StateT HppState
@@ -200,7 +231,7 @@ dischargeHppCaps cfg env' m =
 -- | General hpp runner against input source file lines; can return an
 -- 'Error' value if something goes wrong.
 hppIOSink' :: Config -> Env -> ([String] -> IO ()) -> [String]
-           -> IO (Either Error [FilePath])
+           -> IO (Either Error [IncludedFile])
 hppIOSink' cfg env' snk src =
   fmap (fmap hppFilesRead)
   . dischargeHppCaps cfg env' $
@@ -209,12 +240,12 @@ hppIOSink' cfg env' snk src =
 -- | General hpp runner against input source file lines. Output lines
 -- are fed to the caller-supplied sink function. Any errors
 -- encountered are thrown with 'error'.
-hppIOSink :: Config -> Env -> ([String] -> IO ()) -> [String] -> IO [FilePath]
+hppIOSink :: Config -> Env -> ([String] -> IO ()) -> [String] -> IO [IncludedFile]
 hppIOSink cfg env' snk = hppIOSink' cfg env' snk >=> either throwIO return
 
 -- | hpp runner that returns output lines.
 hppIO :: Config -> Env ->  FilePath -> [String]
-      -> IO (Either Error ([FilePath], [String]))
+      -> IO (Either Error ([IncludedFile], [String]))
 hppIO cfg env' fileName src = do
   r <- newIORef id
   let snk xs = modifyIORef r (. (xs++))
