@@ -428,6 +428,29 @@ tests =
             , "\n"
             ]
 
+  -- A Haskell character literal whose body is a double-quote (`'\"'`)
+  -- must not put the state machine into a HsString state — otherwise
+  -- every directive on subsequent lines (here the `#endif`) is hidden
+  -- by demotion and the `#ifndef` is left with no matching close,
+  -- bubbling up as `awaitJust: dropBranch`. Real-world trigger:
+  -- filepath/System/FilePath/Internal.hs line `_quotedbl = '\"'`
+  -- inside a `#ifndef OS_PATH ... #else ... #endif` block.
+  , hppHelper (haskellComments (remove_line emptyHppState))
+            [ "#define OS_PATH"
+            , "#ifndef OS_PATH"
+            , "before = 1"
+            , "#else"
+            , "_quotedbl = '\"'"
+            , "after = 2"
+            , "#endif"
+            , "tail = 3"
+            ]
+            [ "_quotedbl = '\"'\n"
+            , "after = 2\n"
+            , "tail = 3\n"
+            , "\n"
+            ]
+
   -- A @#line N@ directive must make the immediately following
   -- input line expand __LINE__ to N (not N+1). The line-counter
   -- semantics here are load-bearing for any caller that resets
