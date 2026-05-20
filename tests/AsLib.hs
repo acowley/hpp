@@ -385,6 +385,49 @@ tests =
         ]
         (any (BS.isInfixOf "errno_marker"))
 
+  -- With ignoreHaskellComments enabled, identifier tokens that fall
+  -- inside a Haskell `-- ...` line comment must NOT be macro-expanded.
+  -- Real-world trigger: the GHC RTS chain defines
+  --     #define REG(x) __asm__("%" #x)
+  -- and `compiler/CodeGen.Platform.h` later contains the prose
+  --     -- Normally, the register names are just stringified as
+  --     -- part of the REG() macro
+  -- which HPP previously tokenized as a real REG() call and reported
+  -- TooFewArgumentsToMacro. With the fix the comment is opaque and
+  -- the file preprocesses cleanly (the directive lines still expand
+  -- in code positions).
+  , hppHelper (haskellComments (remove_line emptyHppState))
+            [ "#define REG(x) reg_x"
+            , "-- comment with REG() inside should not expand"
+            , "foo = 42"
+            ]
+            [ "-- comment with REG() inside should not expand\n"
+            , "foo = 42\n"
+            , "\n"
+            ]
+
+  -- Same for `{- ... -}` block comments: identifiers inside the
+  -- comment body must not be macro-expanded.
+  , hppHelper (haskellComments (remove_line emptyHppState))
+            [ "#define REG(x) reg_x"
+            , "{- block with REG() inside -}"
+            , "foo = 42"
+            ]
+            [ "{- block with REG() inside -}\n"
+            , "foo = 42\n"
+            , "\n"
+            ]
+
+  -- And the same for string literals: a macro name inside a "..."
+  -- literal must not be treated as a macro invocation.
+  , hppHelper (haskellComments (remove_line emptyHppState))
+            [ "#define REG(x) reg_x"
+            , "msg = \"REG() in a string literal\""
+            ]
+            [ "msg = \"REG() in a string literal\"\n"
+            , "\n"
+            ]
+
   -- A @#line N@ directive must make the immediately following
   -- input line expand __LINE__ to N (not N+1). The line-counter
   -- semantics here are load-bearing for any caller that resets
