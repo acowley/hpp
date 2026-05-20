@@ -12,13 +12,14 @@ module Hpp.Preprocessing
   ) where
 import Control.Arrow (first)
 import Data.Char (isSpace)
+import qualified Data.ByteString.Char8 as B
 #if __GLASGOW_HASKELL__ < 804
 import Data.Semigroup ((<>))
 #endif
 import Data.String (fromString)
 import Hpp.Config
 import Hpp.StringSig
-import Hpp.Tokens (tokenize, Token(..), detokenize, skipLiteral)
+import Hpp.Tokens (tokenize, Token(..), detok, detokenize, skipLiteral)
 import Hpp.Types (TOKEN, String, HasHppState, getState, config, getL)
 import Prelude hiding (String)
 
@@ -148,41 +149,41 @@ cCommentRemoval' do_trigraphs =
 
 -- * Haskell comments
 
--- Note [Gating directive dispatch inside Haskell comments]
--- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
--- HPP is a C/C++ preprocessor that spots directives by the rule "the
--- first non-whitespace token on a line is an Important '#'". In
--- Haskell sources that rule misfires on the closing brace of a
--- multi-line LANGUAGE pragma:
+-- Note [Treating Haskell comments and strings as opaque to CPP]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+-- HPP is a C/C++ preprocessor; when it preprocesses Haskell sources
+-- it must NOT interpret tokens that live inside Haskell comments or
+-- string literals. Two distinct misfires used to trip:
 --
---     {-# LANGUAGE CPP
---               , OverloadedStrings
---       #-}
+--   1. The closing brace of a multi-line LANGUAGE pragma:
+--        {-# LANGUAGE CPP
+--                  , OverloadedStrings
+--          #-}
+--      starts the third line with @#-}@, which HPP would dispatch as
+--      the unknown directive @-}@.
 --
--- The third line starts with @#-}@, which HPP would otherwise dispatch
--- as the unknown directive @-}@.
+--   2. A bare identifier inside a @-- …@ line comment (or any other
+--      Haskell comment / string body) whose spelling matches a
+--      function-like macro defined earlier in the include chain.
+--      Concretely, the GHC RTS chain defines @REG(x) __asm__(\"%\" #x)@
+--      in @stg/MachRegs/x86.h@; @compiler/CodeGen.Platform.h@ later
+--      contains the prose
+--        -- Normally, the register names are just stringified as
+--        -- part of the REG() macro
+--      which HPP would otherwise tokenize as a real @REG()@ call,
+--      reporting @TooFewArgumentsToMacro@.
 --
--- When 'ignoreHaskellComments' is enabled we run a small stateful
--- pass ('gateHaskellComments') over the /tokenized/ line stream. It
--- tracks Haskell lexical state across lines: nestable @{- ... -}@
--- block comments, @-- ...@ line comments, @\"...\"@ string literals,
--- and GHC's 'MultilineStrings' extension (a literal opened with
--- @\"\"\"@ and closed by the next unescaped @\"\"\"@, which may span
--- many lines).
---
--- For any line that /starts/ inside an open block comment or inside
--- an open multi-line string we demote a leading @Important \"#\"@
--- token to @Other \"#\"@. That keeps the @#@ character in the output
--- byte-for-byte (detokenize concatenates all tokens indiscriminately)
--- while making the directive detector in "Hpp.Directive" skip it.
--- Multi-line strings need this for the same reason block comments do
--- — a body line that begins with @#@ would otherwise dispatch as a
--- directive even though, in Haskell, it is just string content.
---
--- We deliberately do /not/ rewrite the text of comments or strings,
--- and we do /not/ suppress macro expansion inside them — the only
--- change is that a stray leading @#@ sitting inside an open block
--- comment or multi-line string no longer trips directive dispatch.
+-- 'gateHaskellComments' (enabled by 'ignoreHaskellComments' in the
+-- config) handles both: we track Haskell lexical state across lines
+-- (nestable @{- … -}@, @-- …@, @\"…\"@, and the @\"\"\"…\"\"\"@
+-- multi-line string from GHC's 'MultilineStrings' extension) and
+-- demote any 'Important' token whose starting character lies inside
+-- one of those opaque regions to 'Other'. After detokenization the
+-- byte content of the line is unchanged (Other and Important
+-- detokenize identically), so the comment/string still reaches the
+-- output verbatim; only the directive detector and the macro
+-- expander, both of which only consume 'Important' tokens, are
+-- redirected past the region.
 
 -- | Lexical states tracked by 'gateHaskellComments'.
 data HsLex = HsCode
@@ -190,63 +191,109 @@ data HsLex = HsCode
            | HsLineCmt
            | HsString
            | HsMultiString
+  deriving (Eq, Show)
 
--- | See Note [Gating directive dispatch inside Haskell comments].
+-- | See Note [Treating Haskell comments and strings as opaque to CPP].
 gateHaskellComments :: [[TOKEN]] -> [[TOKEN]]
 gateHaskellComments = go HsCode
   where
     go _ []         = []
     go st (ln:lns)  =
-      let demoteHere = case st of
-                         HsBlockCmt _  -> True
-                         HsMultiString -> True
-                         _             -> False
-          ln'  | demoteHere = demoteLeadingHash ln
-               | otherwise  = ln
-          stEnd = walk st (toChars (detokenize ln))
+      let chars  = toChars (detokenize ln)
+          trace  = walkTraced st chars
+          stEnd  = case trace of
+                     [] -> st
+                     _  -> snd (last trace)
           -- A Haskell line comment terminates at the physical line
           -- break, so any HsLineCmt state at end-of-line resets to
           -- HsCode for the following line.
           stNext = case stEnd of HsLineCmt -> HsCode; s -> s
+          ln'    = demoteTokens trace ln
       in ln' : go stNext lns
 
-    -- Demote the first Important "#" encountered to an Other token so
-    -- the directive detector skips it. Leading whitespace / Other
-    -- tokens pass through unchanged. If the line's first Important
-    -- token is not "#", we leave it alone.
-    demoteLeadingHash :: [TOKEN] -> [TOKEN]
-    demoteLeadingHash (Other s : rest) = Other s : demoteLeadingHash rest
-    demoteLeadingHash (Important "#" : rest) = Other "#" : rest
-    demoteLeadingHash ln = ln
+    -- Walk the line's character stream, recording every state
+    -- transition as @(positionAfter, newState)@. The list always
+    -- starts with @(0, st0)@. Multi-character transitions (e.g.
+    -- @--@, @{-@, @\"\"\"@) update the position by the full pattern
+    -- length so the resulting trace is monotonic.
+    walkTraced :: HsLex -> [Char] -> [(Int, HsLex)]
+    walkTraced st0 cs = (0, st0) : aux st0 0 cs
+      where
+        aux _ _ []                                = []
+        aux HsCode pos ('{':'-':rest)             =
+          (pos+2, HsBlockCmt 1) : aux (HsBlockCmt 1) (pos+2) rest
+        aux HsCode pos ('-':'-':rest)             =
+          (pos+2, HsLineCmt) : aux HsLineCmt (pos+2) rest
+        -- The triple-quote pattern must precede the single-quote
+        -- one: Haskell pattern matching is order-sensitive and a
+        -- leading @\"@ would otherwise win and start a regular
+        -- string.
+        aux HsCode pos ('"':'"':'"':rest)         =
+          (pos+3, HsMultiString) : aux HsMultiString (pos+3) rest
+        aux HsCode pos ('"':rest)                 =
+          (pos+1, HsString) : aux HsString (pos+1) rest
+        aux HsCode pos (_:rest)                   = aux HsCode (pos+1) rest
+        aux (HsBlockCmt n) pos ('{':'-':rest)     =
+          (pos+2, HsBlockCmt (n+1)) : aux (HsBlockCmt (n+1)) (pos+2) rest
+        aux (HsBlockCmt n) pos ('-':'}':rest)     =
+          let new = if n <= 1 then HsCode else HsBlockCmt (n-1)
+          in (pos+2, new) : aux new (pos+2) rest
+        aux (HsBlockCmt n) pos (_:rest)           =
+          aux (HsBlockCmt n) (pos+1) rest
+        aux HsLineCmt pos (_:rest)                = aux HsLineCmt (pos+1) rest
+        -- Inside a string literal, a backslash escapes the next
+        -- character so an escaped @\\\"@ doesn't prematurely close it.
+        aux HsString pos ('\\':_:rest)            = aux HsString (pos+2) rest
+        aux HsString pos ('"':rest)               =
+          (pos+1, HsCode) : aux HsCode (pos+1) rest
+        aux HsString pos (_:rest)                 = aux HsString (pos+1) rest
+        -- Multi-line strings (GHC's MultilineStrings extension): same
+        -- escape handling as a regular string, but the close delimiter
+        -- is @\"\"\"@.
+        aux HsMultiString pos ('\\':_:rest)       =
+          aux HsMultiString (pos+2) rest
+        aux HsMultiString pos ('"':'"':'"':rest)  =
+          (pos+3, HsCode) : aux HsCode (pos+3) rest
+        aux HsMultiString pos (_:rest)            = aux HsMultiString (pos+1) rest
 
-    walk :: HsLex -> [Char] -> HsLex
-    walk st []                          = st
-    walk HsCode ('{':'-':rest)          = walk (HsBlockCmt 1) rest
-    walk HsCode ('-':'-':rest)          = walk HsLineCmt rest
-    -- The triple-quote pattern must precede the single-quote one:
-    -- Haskell pattern matching is order-sensitive and a leading
-    -- @\"@ would otherwise win and start a regular string.
-    walk HsCode ('"':'"':'"':rest)      = walk HsMultiString rest
-    walk HsCode ('"':rest)              = walk HsString rest
-    walk HsCode (_:rest)                = walk HsCode rest
-    walk (HsBlockCmt n) ('{':'-':rest)  = walk (HsBlockCmt (n+1)) rest
-    walk (HsBlockCmt n) ('-':'}':rest)  =
-      walk (if n <= 1 then HsCode else HsBlockCmt (n-1)) rest
-    walk (HsBlockCmt n) (_:rest)        = walk (HsBlockCmt n) rest
-    walk HsLineCmt (_:rest)             = walk HsLineCmt rest
-    -- Inside a string literal, backslash escapes consume the next
-    -- character so an escaped @\\\"@ doesn't prematurely close it.
-    walk HsString ('\\':_:rest)         = walk HsString rest
-    walk HsString ('"':rest)            = walk HsCode rest
-    walk HsString (_:rest)              = walk HsString rest
-    -- Multi-line strings (GHC's MultilineStrings extension): same
-    -- escape handling as a regular string, but the close delimiter
-    -- is @\"\"\"@. The escape pattern must come first so an escaped
-    -- quote inside the body — e.g. @\\\"@ — does not contribute to
-    -- a stray triple-quote terminator.
-    walk HsMultiString ('\\':_:rest)        = walk HsMultiString rest
-    walk HsMultiString ('"':'"':'"':rest)   = walk HsCode rest
-    walk HsMultiString (_:rest)             = walk HsMultiString rest
+    -- Walk the line's tokens with a running character offset,
+    -- consulting 'trace' for the lexical state at each token's
+    -- starting position. Tokens whose starting position is inside a
+    -- comment or string have their 'Important' constructor rewritten
+    -- to 'Other'; everything else is left untouched.
+    --
+    -- We treat ByteString length as character count, which is exact
+    -- for ASCII and acceptable for the UTF-8 source the rest of HPP
+    -- assumes — the position only matters insofar as it indexes into
+    -- the same byte-list 'walkTraced' just consumed.
+    demoteTokens :: [(Int, HsLex)] -> [TOKEN] -> [TOKEN]
+    demoteTokens trace0 = goTok 0 trace0
+      where
+        goTok _   _      []     = []
+        goTok pos trace1 (t:ts) =
+          let len             = B.length (detok t)
+              (st, trace2)    = stateAt pos trace1
+              t' = case t of
+                     Important s | isOpaque st -> Other s
+                     _                          -> t
+          in t' : goTok (pos + len) trace2 ts
+
+    -- Advance through the trace until we find the latest entry whose
+    -- position is <= p. Returns that entry's state and the suffix of
+    -- the trace starting at that entry, so the caller can keep
+    -- scanning forward without restarting from the beginning.
+    stateAt :: Int -> [(Int, HsLex)] -> (HsLex, [(Int, HsLex)])
+    stateAt _ []                                   = (HsCode, [])
+    stateAt _ tr@[(_, st)]                         = (st, tr)
+    stateAt p tr@((_, st) : rest@((nextPos, _):_))
+      | nextPos <= p = stateAt p rest
+      | otherwise    = (st, tr)
+
+    isOpaque HsLineCmt      = True
+    isOpaque (HsBlockCmt _) = True
+    isOpaque HsString       = True
+    isOpaque HsMultiString  = True
+    isOpaque HsCode         = False
 
 prepareInput :: (Monad m, HasHppState m) => m ([String] -> [[TOKEN]])
 prepareInput =
