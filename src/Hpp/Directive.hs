@@ -14,7 +14,7 @@ import Hpp.Expansion (expandLineState)
 import Hpp.Expr (evalExpr, parseExpr)
 import Hpp.Macro (parseDefinition)
 import Hpp.Preprocessing (prepareInput)
-import Hpp.StringSig (unquote, toChars)
+import Hpp.StringSig (unquote, toChars, uncons)
 import Hpp.Tokens (newLine, notImportant, trimUnimportant, detokenize, isImportant, Token(..))
 import Hpp.Types
 import Hpp.Parser (replace, await, insertInputSegment, takingWhile, droppingWhile, onInputSegment, evalParse, onElements, awaitJust, ParserT, Parser)
@@ -179,13 +179,35 @@ directive = lift (onElements (awaitJust "directive")) >>= aux
         includeAux :: (LineNum -> FilePath -> HppT src (Parser m [TOKEN]) (FilePath, [String]))
                    -> HppT src (Parser m [TOKEN]) ()
         includeAux readFun =
-          do fileName <- lift (toChars . detokenize . trimUnimportant . init
-                               <$> expandLineState)
-             ln <- use lineNum
+          -- Note [Macro expansion in #include arguments]
+          -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+          -- C99 §6.10.2 distinguishes three forms of #include:
+          --   #include <h-char-sequence>   -- macros NOT expanded
+          --   #include "q-char-sequence"   -- macros NOT expanded
+          --   #include pp-tokens           -- macros expanded; the
+          --                                   result must be one of
+          --                                   the two forms above
+          -- Without this distinction, a perfectly legal earlier
+          -- definition such as glibc's `#define errno (*__errno_location ())`
+          -- (which the system <errno.h> itself installs) would corrupt
+          -- every subsequent `#include <errno.h>` into
+          -- `#include <(*__errno_location ()).h>` and fail.
+          do toks <- lift (trimUnimportant <$> takeLine)
+             ln  <- subtract 1 <$> use lineNum -- takeLine bumped past the directive
+             let literal = case dropWhile notImportant toks of
+                   Important t : _ -> case uncons t of
+                     Just ('<', _) -> True
+                     Just ('"', _) -> True
+                     _             -> False
+                   _ -> False
+             finalToks <-
+               if literal
+                 then pure toks
+                 else lift (lift (evalParse expandLineState [toks]))
+             let fileName = toChars (detokenize (trimUnimportant finalToks))
              prep <- prepareInput
              (resolvedPath, content) <- readFun ln fileName
              let src = prep content
-             lineNum .= ln+1
              lift (streamNewFile resolvedPath src)
         {- SPECIALIZE includeAux ::
             (LineNum -> FilePath -> HppT [String] (Parser (StateT HppState (ExceptT Error IO)) [TOKEN]) (FilePath, [String]))

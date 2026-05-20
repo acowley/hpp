@@ -367,6 +367,24 @@ tests =
         ["#include <stg/MachRegsForHost.h>"]
         (any (BS.isInfixOf "deep_marker"))
 
+  -- C99 §6.10.2: macros must NOT be expanded inside `<...>` or
+  -- `"..."` include arguments. Real-world trigger: glibc's
+  -- <errno.h> installs `#define errno (*__errno_location ())`,
+  -- so any downstream `#include <errno.h>` would otherwise be
+  -- rewritten to `#include <(*__errno_location ()).h>` and fail
+  -- with IncludeDoesNotExist. The `#define` form (with a space
+  -- before the body) produces an object-like macro — the form
+  -- that triggers the bug. add_definition cannot reproduce it
+  -- because the helper concatenates tokens with no separator,
+  -- which parseDefinition reads as function-like.
+  , withCurrentDirectory "tests/include-data" $
+      hppFileHelper
+        (with_include_paths ["macro-in-include"] (remove_line emptyHppState))
+        [ "#define errno (*__errno_location ())"
+        , "#include <errno.h>"
+        ]
+        (any (BS.isInfixOf "errno_marker"))
+
   -- A @#line N@ directive must make the immediately following
   -- input line expand __LINE__ to N (not N+1). The line-counter
   -- semantics here are load-bearing for any caller that resets
