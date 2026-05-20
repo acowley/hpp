@@ -12,6 +12,7 @@ import qualified Hpp.Types as T
 import Data.Monoid ((<>))
 #endif
 
+import qualified Data.List as List
 import System.Directory (withCurrentDirectory)
 import System.Exit
 
@@ -53,6 +54,21 @@ hppFileHelper st src ok = do
       if ok (hppOutput res)
         then return True
         else do putStrLn ("Got: " ++ show (hppOutput res))
+                return False
+
+-- | Variant of 'hppFileHelper' that checks 'hppFilesRead' (the list
+-- of files HPP actually opened) against a predicate, rather than the
+-- emitted output.
+hppFilesReadHelper
+  :: HppState -> [ByteString] -> ([IncludedFile] -> Bool) -> IO Bool
+hppFilesReadHelper st src ok = do
+  r <- runExceptT (runHpp st (preprocess src))
+  case r of
+    Left e -> putStrLn ("Error running hpp: " ++ show e) >> return False
+    Right (res, _) ->
+      if ok (hppFilesRead res)
+        then return True
+        else do putStrLn ("Got hppFilesRead: " ++ show (hppFilesRead res))
                 return False
 
 sourceCommentsAndSplice :: [ByteString]
@@ -427,6 +443,28 @@ tests =
             [ "msg = \"REG() in a string literal\"\n"
             , "\n"
             ]
+
+  -- For each #include HPP successfully opened, 'hppFilesRead' must
+  -- return both the textual include argument (with its @<…>@ /
+  -- @"…"@ delimiters intact) and the absolute on-disk path the
+  -- search path actually resolved to. Keeping the two side by side
+  -- lets downstream tooling either echo the original spelling or
+  -- attribute the file to a specific include-search directory; the
+  -- textual form alone is unusable as a filesystem path (delimiters
+  -- still attached) and the resolved form alone loses the original
+  -- spelling.
+  , withCurrentDirectory "tests/include-data" $
+      hppFilesReadHelper
+        (with_include_paths ["macro-in-include"] (remove_line emptyHppState))
+        [ "#include <errno.h>" ]
+        (\fs ->
+            case fs of
+              [f] ->
+                ifInclude f == "<errno.h>"
+                && not ('<' `elem` ifPath f)
+                && not ('>' `elem` ifPath f)
+                && "macro-in-include/errno.h" `List.isSuffixOf` ifPath f
+              _   -> False)
 
   -- A Haskell character literal whose body is a double-quote (`'\"'`)
   -- must not put the state machine into a HsString state — otherwise

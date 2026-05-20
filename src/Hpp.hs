@@ -7,7 +7,7 @@ module Hpp ( -- * Running the Preprocessor
             -- * Adding Definitions
             parseDefinition, addDefinition,
             -- * Core Types
-             HppT, HppOutput(..)
+             HppT, HppOutput(..), R.IncludedFile(..)
             ) where
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Trans.Class (lift, MonadTrans)
@@ -38,8 +38,11 @@ newtype HppT m a =
 instance MonadTrans HppT where
   lift = HppT . lift . lift . lift . lift
 
--- | The result of running hpp
-data HppOutput = HppOutput { hppFilesRead :: [FilePath]
+-- | The result of running hpp. 'hppFilesRead' carries one
+-- 'R.IncludedFile' per @#include@ directive that successfully
+-- opened a file; see that type for the textual-vs-resolved-path
+-- split.
+data HppOutput = HppOutput { hppFilesRead :: [R.IncludedFile]
                            , hppOutput    :: [ByteString] }
 
 -- | Preprocess lines of input.
@@ -69,7 +72,7 @@ streamHpp :: MonadIO m
           => T.HppState
           -> ([ByteString] -> m ())
           -> HppT m a
-          -> ExceptT T.Error m ([FilePath], T.HppState)
+          -> ExceptT T.Error m ([R.IncludedFile], T.HppState)
 streamHpp st snk (HppT h) =
   do (a, st') <- S.runStateT
                      (evalParse
